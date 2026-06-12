@@ -37,9 +37,6 @@ export default function App() {
       <div style={{ ...HUD_STYLE, ...blue, top: 16, right: 16 }}>
         STATUS::ONLINE
       </div>
-      <div style={{ ...HUD_STYLE, ...green, bottom: 16, left: '50%', transform: 'translateX(-50%)' }}>
-        GRID::ACTIVE
-      </div>
     </div>
   )
 }
