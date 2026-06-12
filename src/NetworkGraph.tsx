@@ -19,6 +19,8 @@ interface Packet {
   nodes: string[]      // route
   seg: number          // current segment index
   segElapsed: number   // ms elapsed within current segment
+  bytes: number
+  ttl: number
 }
 
 interface Shard { x: number; y: number; vx: number; vy: number; start: number; color: string }
@@ -164,6 +166,131 @@ function EdgeCard({ tip, cref }: {
           → чем меньше → тем предпочтительнее маршрут<br />
           → (формула: Cost = 100 000 000 / BW в бит/с)
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Packet hover tooltip ──────────────────────────────────────────────────────
+
+// per-segment "ЦЕЛЬ" texts keyed by sourceType::targetType
+const SEG_GOAL: Record<string, string> = {
+  'User::Switch':        'L2 коммутация по MAC-адресу',
+  'Switch::ISP':         'передача на роутер провайдера',
+  'ISP::ТСПУ':          '⚠ инспекция DPI — ТСПУ читает IP и SNI',
+  'ТСПУ::Firewall':     'пакет прошёл проверку ТСПУ',
+  'ТСПУ::VPN':          'туннелирование — ТСПУ видит только IP VPN',
+  'VPN::Firewall':       'расшифровка на VPN сервере',
+  'Firewall::WebServer': 'доставка на веб-сервер',
+  'User::DNS_Stub':      'DNS запрос — резолюция домена в IP',
+  'DNS_Stub::DNS_R':     'рекурсивный резолвер ищет ответ',
+  'DNS_R::DNS_ROOT':     'запрос к корневым серверам (13 штук)',
+  'DNS_ROOT::DNS_TLD':   'корень отвечает: спроси .com сервер',
+  'DNS_TLD::DNS_AUTH':   'TLD отвечает: спроси авторитетный NS',
+}
+
+function segGoal(p: Packet): string {
+  const a = p.nodes[p.seg], b = p.nodes[p.seg + 1]
+  if (!b) return 'доставка завершена'
+  // FW → WS3 special case
+  if (a === 'fw1' && b === 'ws3') return '⛔ ЗАБЛОКИРОВАНО — нужен VPN туннель'
+  const ta = NODE_TYPE_MAP.get(a), tb = NODE_TYPE_MAP.get(b)
+  return SEG_GOAL[`${ta}::${tb}`] ?? SEG_GOAL[`${tb}::${ta}`] ?? 'передача данных'
+}
+
+const PKT_PROTO_HINT: Record<PacketKind, { proto: string; hint: string }> = {
+  http:    { proto: 'TCP',          hint: 'надёжная доставка с подтверждением' },
+  tunnel:  { proto: 'WireGuard/UDP', hint: 'шифрованный туннель поверх UDP' },
+  dns:     { proto: 'DNS / UDP 53', hint: 'быстрый запрос без подтверждения' },
+  blocked: { proto: 'TCP',          hint: 'надёжная доставка с подтверждением' },
+}
+
+const PKT_TITLE: Record<PacketKind, string> = {
+  http: 'TCP пакет', tunnel: 'VPN пакет', dns: 'DNS пакет', blocked: 'TCP пакет',
+}
+
+function PktTooltip({ tip, cref, paused }: {
+  tip: { x: number; y: number; pkt: Packet }
+  cref: React.RefObject<HTMLDivElement>
+  paused: boolean
+}) {
+  const { pkt } = tip
+  const isBlocked = pkt.kind === 'blocked'
+  const color = isBlocked ? '#ff4444' : PKT_COLOR[pkt.kind]
+  const a = pkt.nodes[pkt.seg], b = pkt.nodes[pkt.seg + 1]
+  const aName = NODE_MAP.get(a)?.sublabel ?? a
+  const bName = b ? (NODE_MAP.get(b)?.sublabel ?? b) : '—'
+  const { proto, hint } = PKT_PROTO_HINT[pkt.kind]
+  const cardW = 340; const cardH = isBlocked ? 200 : 260; const PAD = 14
+  const rect = cref.current?.getBoundingClientRect()
+  const cw = rect?.width ?? window.innerWidth; const ch = rect?.height ?? window.innerHeight
+  let left = tip.x + PAD; let top = tip.y + PAD
+  if (left + cardW > cw) left = tip.x - cardW - PAD
+  if (top  + cardH > ch) top  = tip.y - cardH - PAD
+
+  const mono = { fontFamily: '"Share Tech Mono", monospace' } as const
+
+  if (isBlocked) {
+    return (
+      <div style={{ position: 'absolute', left, top, width: cardW, zIndex: 230,
+        background: '#0d1424', border: '1.5px solid #ff4444', boxShadow: '0 0 16px #ff444455',
+        padding: '12px 16px', pointerEvents: 'none' }}>
+        <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color: '#ff4444',
+          marginBottom: 10, textShadow: '0 0 8px #ff4444' }}>
+          ✕ ЗАБЛОКИРОВАНО ТСПУ
+        </div>
+        {[
+          ['ПРИЧИНА',        'SNI содержит blocked.com'],
+          ['ЧТО ВИДЕЛ ТСПУ', 'IP назначения + SNI'],
+          ['ОБХОД',          'VPN туннель скрывает SNI'],
+        ].map(([k, v]) => (
+          <div key={k} style={{ ...mono, fontSize: 11, lineHeight: '2', display: 'flex', gap: 8 }}>
+            <span style={{ color: '#4a6a8a', minWidth: 130, flexShrink: 0 }}>{k}:</span>
+            <span style={{ color: k === 'ОБХОД' ? '#9c6bff' : '#ff8888' }}>{v}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'absolute', left, top, width: cardW, zIndex: 230,
+      background: '#0d1424', border: `1.5px solid ${color}`, boxShadow: `0 0 14px ${color}55`,
+      padding: '12px 16px', pointerEvents: 'none' }}>
+      <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color,
+        marginBottom: 10, textShadow: `0 0 8px ${color}` }}>
+        {PKT_TITLE[pkt.kind]}
+      </div>
+      <div style={{ borderTop: '1px solid #1e2d4a', marginBottom: 8 }} />
+      <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
+        <span style={{ color: '#4a6a8a', minWidth: 86, flexShrink: 0 }}>МАРШРУТ:</span>
+        <span style={{ color: '#c8d8f0' }}>{aName} → {bName}</span>
+      </div>
+      <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
+        <span style={{ color: '#4a6a8a', minWidth: 86, flexShrink: 0 }}>ПРОТОКОЛ:</span>
+        <span style={{ color: '#c8d8f0' }}>{proto}</span>
+      </div>
+      <div style={{ ...mono, fontSize: 9, color: '#5a7090', paddingLeft: 94, lineHeight: '1.4' }}>
+        → {hint}
+      </div>
+      <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
+        <span style={{ color: '#4a6a8a', minWidth: 86, flexShrink: 0 }}>РАЗМЕР:</span>
+        <span style={{ color: '#c8d8f0' }}>{pkt.bytes} байт{pkt.bytes === 1460 ? ' (стандартный MTU Ethernet)' : ''}</span>
+      </div>
+      <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
+        <span style={{ color: '#4a6a8a', minWidth: 86, flexShrink: 0 }}>TTL:</span>
+        <span style={{ color: '#c8d8f0' }}>{pkt.ttl}</span>
+      </div>
+      <div style={{ ...mono, fontSize: 9, color: '#5a7090', paddingLeft: 94, lineHeight: '1.4' }}>
+        → осталось {pkt.ttl} хопов до истечения
+      </div>
+      <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
+        <span style={{ color: '#4a6a8a', minWidth: 86, flexShrink: 0 }}>СТАТУС:</span>
+        <span style={{ color: paused ? '#ffb300' : '#00e676' }}>{paused ? 'ЗАМОРОЖЕН' : 'TRANSIT'}</span>
+      </div>
+      <div style={{ borderTop: '1px solid #1e2d4a', margin: '8px 0' }} />
+      <div style={{ ...mono, fontSize: 11, color: pkt.kind === 'tunnel' ? '#9c6bff' : '#88ffcc', lineHeight: '1.6' }}>
+        ЦЕЛЬ: {segGoal(pkt)}
       </div>
     </div>
   )
@@ -341,6 +468,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const [counters, setCounters]   = useState({ delivered: 0, blocked: 0, dns: 0, vpn: 0 })
   const [edgeTip, setEdgeTip]     = useState<{ x: number; y: number; edge: NetEdge; util: number } | null>(null)
   const [nodeTip, setNodeTip]     = useState<{ x: number; y: number; node: NetNode } | null>(null)
+  const [pktTip, setPktTip]       = useState<{ x: number; y: number; pkt: Packet } | null>(null)
   const [statsState, setStatsState] = useState<Map<string, { passed: number; blocked: number }>>(new Map())
   const [log, setLog] = useState<string[]>([])
   const [ospfPath, setOspfPath]   = useState<{ nodes: string[]; cost: number } | null>(null)
@@ -367,7 +495,8 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     else if (r < 0.62) tmpl = buildBlockedRoute(u)
     else if (r < 0.82) tmpl = buildTunnelRoute(u)
     else               tmpl = buildDnsRoute()
-    const p: Packet = { id: nextIdRef.current++, kind: tmpl.kind, nodes: tmpl.nodes, seg: 0, segElapsed: 0 }
+    const p: Packet = { id: nextIdRef.current++, kind: tmpl.kind, nodes: tmpl.nodes, seg: 0, segElapsed: 0,
+      bytes: [64, 512, 1460][Math.floor(Math.random() * 3)], ttl: 32 + Math.floor(Math.random() * 32) }
     packetsRef.current.push(p)
     bounce(p.nodes[0], 200, 0.2)   // User bounce on send
   }, [bounce])
@@ -632,7 +761,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       .on('zoom', event => {
         g.attr('transform', event.transform)
         setZoomLevel(Math.round(event.transform.k * 100) / 100)
-        setEdgeTip(null); setNodeTip(null)
+        setEdgeTip(null); setNodeTip(null); setPktTip(null)
       })
     zoomBehRef.current = zoom; svg.call(zoom)
 
@@ -744,9 +873,15 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           .data(packetsRef.current, d => d.id)
           .join(
             enter => {
-              const grp = enter.append('g').attr('class', 'pkt')
+              const grp = enter.append('g').attr('class', 'pkt').style('cursor', 'crosshair')
               grp.append('rect').attr('class', 'pkt-out').attr('fill', 'none').attr('rx', 1)
               grp.append('rect').attr('class', 'pkt-body').attr('rx', 1)
+              grp
+                .on('mouseenter mousemove', function(event: MouseEvent, d) {
+                  const r = cref.current!.getBoundingClientRect()
+                  setPktTip({ x: event.clientX - r.left, y: event.clientY - r.top, pkt: d })
+                })
+                .on('mouseleave', () => setPktTip(null))
               return grp
             },
             update => update, exit => exit.remove()
@@ -762,7 +897,9 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             const y = pa.y + (pb.y - pa.y) * t
             const tunneled = d.kind === 'tunnel' && isTunnelSegment(a, b)
             const color = tunneled ? '#9c6bff' : PKT_COLOR[d.kind]
-            const size = 8
+            // 6px live, 8px on pause + pulsing outline for easier hover
+            const size = frozen ? 8 : 6
+            const pulse = frozen ? (Math.sin(now / 300) * 0.5 + 0.5) : 0
             const el = d3.select(this)
             el.select('.pkt-body')
               .attr('x', x - size / 2).attr('y', y - size / 2).attr('width', size).attr('height', size)
@@ -770,8 +907,9 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             el.select('.pkt-out')
               .attr('x', x - size / 2 - 3).attr('y', y - size / 2 - 3)
               .attr('width', size + 6).attr('height', size + 6)
-              .attr('stroke', '#9c6bff').attr('stroke-width', tunneled ? 1.5 : 0)
-              .attr('opacity', tunneled ? 0.9 : 0)
+              .attr('stroke', tunneled ? '#9c6bff' : color)
+              .attr('stroke-width', tunneled ? 1.5 : frozen ? 1 + pulse * 1.5 : 0)
+              .attr('opacity', tunneled ? 0.9 : frozen ? 0.3 + pulse * 0.6 : 0)
           })
       }
 
@@ -860,6 +998,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       <svg ref={svgRef} className="w-full h-full" style={{ background: 'transparent' }} />
       {edgeTip && <EdgeCard tip={edgeTip} cref={cref} />}
       {nodeTip && <NodeTip tip={nodeTip} cref={cref} stats={statsState} />}
+      {pktTip && <PktTooltip tip={pktTip} cref={cref} paused={paused} />}
       {ospfActive && <OspfBadge />}
       {ospfActive && ospfPath && <OspfBanner path={ospfPath.nodes} cost={ospfPath.cost} />}
       {editingEdge && <WeightEditor edge={editingEdge} onCommit={commitWeight} onCancel={() => setEditingEdge(null)} />}
