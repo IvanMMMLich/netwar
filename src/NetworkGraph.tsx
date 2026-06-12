@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3'
 
 type NodeType = 'Router' | 'Switch' | 'CDN' | 'VPN' | 'DNS' | 'ТСПУ'
@@ -6,12 +6,17 @@ type NodeType = 'Router' | 'Switch' | 'CDN' | 'VPN' | 'DNS' | 'ТСПУ'
 interface NetNode extends d3.SimulationNodeDatum {
   id: string
   type: NodeType
-  label: string
 }
 
 interface NetLink extends d3.SimulationLinkDatum<NetNode> {
   source: string | NetNode
   target: string | NetNode
+}
+
+interface TooltipState {
+  x: number
+  y: number
+  node: NetNode
 }
 
 const NODE_COLOR: Record<NodeType, string> = {
@@ -32,34 +37,134 @@ const NODE_LABEL: Record<NodeType, string> = {
   ТСПУ:  'T',
 }
 
+const NODE_INFO: Record<NodeType, string[]> = {
+  Router: [
+    'Маршрутизатор L3',
+    'Протокол: OSPF/BGP',
+    'Пересылает пакеты по IP-адресу',
+    'TTL уменьшается на каждом хопе',
+  ],
+  Switch: [
+    'Коммутатор L2',
+    'Работает по MAC-адресам',
+    'Строит таблицу CAM',
+    'Не видит IP-адреса',
+  ],
+  CDN: [
+    'Сеть доставки контента',
+    'Кэширует запросы',
+    'Снижает задержку',
+    'Ближайший к пользователю сервер',
+  ],
+  VPN: [
+    'Туннель шифрования',
+    'Прячет IP и SNI',
+    'Два плеча маршрута',
+    'Протоколы: WireGuard / VLESS',
+  ],
+  DNS: [
+    'Резолвер имён',
+    'Переводит домен в IP',
+    'Записи: A / MX / CNAME / TXT',
+    'Порт 53 UDP',
+  ],
+  ТСПУ: [
+    'Глубокая инспекция пакетов',
+    'Читает IP / SNI / DNS',
+    'Блокирует по чёрному списку',
+    'Установлен у провайдера',
+  ],
+}
+
 const NODES: NetNode[] = [
-  { id: 'r1', type: 'Router', label: 'R' },
-  { id: 'r2', type: 'Router', label: 'R' },
-  { id: 's1', type: 'Switch', label: 'S' },
-  { id: 'cdn1', type: 'CDN',  label: 'C' },
-  { id: 'vpn1', type: 'VPN',  label: 'V' },
-  { id: 'dns1', type: 'DNS',  label: 'D' },
-  { id: 'tspu1', type: 'ТСПУ', label: 'T' },
-  { id: 's2', type: 'Switch', label: 'S' },
+  { id: 'r1',    type: 'Router' },
+  { id: 'r2',    type: 'Router' },
+  { id: 's1',    type: 'Switch' },
+  { id: 'cdn1',  type: 'CDN'   },
+  { id: 'vpn1',  type: 'VPN'   },
+  { id: 'dns1',  type: 'DNS'   },
+  { id: 'tspu1', type: 'ТСПУ'  },
+  { id: 's2',    type: 'Switch' },
 ]
 
 const LINKS: NetLink[] = [
-  { source: 'r1',   target: 'r2'   },
-  { source: 'r1',   target: 's1'   },
-  { source: 'r1',   target: 'tspu1' },
-  { source: 'r2',   target: 's2'   },
-  { source: 'r2',   target: 'vpn1' },
-  { source: 's1',   target: 'cdn1' },
-  { source: 's1',   target: 'dns1' },
-  { source: 's2',   target: 'dns1' },
-  { source: 'tspu1', target: 'vpn1' },
-  { source: 'cdn1', target: 's2'   },
+  { source: 'r1',    target: 'r2'    },
+  { source: 'r1',    target: 's1'    },
+  { source: 'r1',    target: 'tspu1' },
+  { source: 'r2',    target: 's2'    },
+  { source: 'r2',    target: 'vpn1'  },
+  { source: 's1',    target: 'cdn1'  },
+  { source: 's1',    target: 'dns1'  },
+  { source: 's2',    target: 'dns1'  },
+  { source: 'tspu1', target: 'vpn1'  },
+  { source: 'cdn1',  target: 's2'    },
 ]
 
 const SIZE = 32
 
+function Tooltip({ tip, containerRef }: { tip: TooltipState; containerRef: React.RefObject<HTMLDivElement> }) {
+  const color = NODE_COLOR[tip.node.type]
+  const lines = NODE_INFO[tip.node.type]
+  const PAD = 16
+
+  const rect = containerRef.current?.getBoundingClientRect()
+  const w = rect?.width ?? window.innerWidth
+  const h = rect?.height ?? window.innerHeight
+
+  // card dimensions (rough estimate)
+  const cardW = 260
+  const cardH = 100
+
+  let left = tip.x + PAD
+  let top  = tip.y + PAD
+  if (left + cardW > w) left = tip.x - cardW - PAD
+  if (top + cardH > h)  top  = tip.y - cardH - PAD
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left,
+        top,
+        background: '#0d1424',
+        border: `1.5px solid ${color}`,
+        boxShadow: `0 0 12px ${color}55`,
+        padding: '10px 14px',
+        pointerEvents: 'none',
+        zIndex: 100,
+        minWidth: cardW,
+      }}
+    >
+      {/* Header */}
+      <div style={{
+        fontFamily: '"Press Start 2P", cursive',
+        fontSize: 10,
+        color,
+        marginBottom: 8,
+        letterSpacing: '0.1em',
+      }}>
+        [{NODE_LABEL[tip.node.type]}] {tip.node.type}
+      </div>
+      {/* Lines */}
+      {lines.map((line, i) => (
+        <div key={i} style={{
+          fontFamily: '"Share Tech Mono", monospace',
+          fontSize: 11,
+          color: i === 0 ? '#c8d8f0' : '#7a9ab8',
+          lineHeight: '1.7',
+          paddingLeft: i === 0 ? 0 : 8,
+        }}>
+          {i === 0 ? line : `› ${line}`}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function NetworkGraph() {
   const svgRef = useRef<SVGSVGElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
 
   useEffect(() => {
     const svg = d3.select(svgRef.current!)
@@ -88,6 +193,15 @@ export default function NetworkGraph() {
       .data(nodes)
       .join('g')
       .style('cursor', 'grab')
+      .on('mouseenter', (event: MouseEvent, d) => {
+        const rect = containerRef.current!.getBoundingClientRect()
+        setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top, node: d })
+      })
+      .on('mousemove', (event: MouseEvent, d) => {
+        const rect = containerRef.current!.getBoundingClientRect()
+        setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top, node: d })
+      })
+      .on('mouseleave', () => setTooltip(null))
       .call(
         d3.drag<SVGGElement, NetNode>()
           .on('start', (event, d) => {
@@ -103,7 +217,6 @@ export default function NetworkGraph() {
           })
       )
 
-    // Square node body
     nodeSel.append('rect')
       .attr('x', -SIZE / 2)
       .attr('y', -SIZE / 2)
@@ -115,7 +228,6 @@ export default function NetworkGraph() {
       .attr('stroke-width', 2)
       .style('filter', d => `drop-shadow(0 0 6px ${NODE_COLOR[d.type]}88)`)
 
-    // Node letter
     nodeSel.append('text')
       .text(d => NODE_LABEL[d.type])
       .attr('text-anchor', 'middle')
@@ -125,7 +237,6 @@ export default function NetworkGraph() {
       .attr('font-size', '11px')
       .style('pointer-events', 'none')
 
-    // Node type label below
     nodeSel.append('text')
       .text(d => d.type)
       .attr('text-anchor', 'middle')
@@ -142,7 +253,6 @@ export default function NetworkGraph() {
         .attr('y1', d => (d.source as NetNode).y!)
         .attr('x2', d => (d.target as NetNode).x!)
         .attr('y2', d => (d.target as NetNode).y!)
-
       nodeSel.attr('transform', d => `translate(${d.x},${d.y})`)
     })
 
@@ -150,10 +260,9 @@ export default function NetworkGraph() {
   }, [])
 
   return (
-    <svg
-      ref={svgRef}
-      className="w-full h-full"
-      style={{ background: 'transparent' }}
-    />
+    <div ref={containerRef} className="w-full h-full" style={{ position: 'relative' }}>
+      <svg ref={svgRef} className="w-full h-full" style={{ background: 'transparent' }} />
+      {tooltip && <Tooltip tip={tooltip} containerRef={containerRef} />}
+    </div>
   )
 }
