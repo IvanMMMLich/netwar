@@ -1,7 +1,7 @@
 import React from 'react'
 import { useStore } from '../store'
 import { NODE_COLOR, NODE_FULL_LABEL, NODE_TYPE_MAP, NODE_MAP } from '../data/topology'
-import { NODE_CAPABILITY } from '../data/nodeInfo'
+import { NODE_CAPABILITY, NODE_ENCAP } from '../data/nodeInfo'
 
 const COL = {
   bg:      '#070b14',
@@ -34,6 +34,44 @@ function Row({ icon, text, color }: { icon: string; text: string; color: string 
       fontSize: 11, lineHeight: '1.8', color }}>
       <span style={{ flexShrink: 0, width: 12 }}>{icon}</span>
       <span>{text}</span>
+    </div>
+  )
+}
+
+function Matryoshka({ encap }: { encap: import('../data/nodeInfo').NodeEncap }) {
+  // Render layers as nested boxes, innermost last.
+  const renderLayer = (i: number): React.ReactNode => {
+    if (i >= encap.layers.length) return null
+    const l = encap.layers[i]
+    const frame = l.encrypted ? '#9c6bff' : l.danger ? COL.red : l.sees ? COL.green : '#2a3a4a'
+    const txt   = l.encrypted ? '#9c6bff' : l.danger ? COL.red : l.sees ? COL.text : '#3a4a5a'
+    return (
+      <div style={{ border: `1px solid ${frame}`, borderRadius: 2, padding: '5px 7px',
+        marginTop: 4, background: l.encrypted ? '#9c6bff10' : l.sees ? `${frame}08` : 'transparent' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6,
+          fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: txt }}>
+          <span>{l.label}</span>
+          <span style={{ color: frame, flexShrink: 0 }}>
+            {l.encrypted ? '[ШИФР]' : l.sees ? '[ВИДИТ]' : '[СЛЕПОЙ]'}
+          </span>
+        </div>
+        {l.detail?.map((d, j) => (
+          <div key={j} style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9,
+            color: l.danger ? '#ff8888' : '#5a7090', paddingLeft: 8, lineHeight: '1.5' }}>
+            └ {d}
+          </div>
+        ))}
+        {renderLayer(i + 1)}
+      </div>
+    )
+  }
+  return (
+    <div>
+      {renderLayer(0)}
+      <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: COL.dim,
+        lineHeight: '1.7', marginTop: 8, borderLeft: `2px solid ${COL.blue}`, paddingLeft: 8 }}>
+        {encap.explanation}
+      </div>
     </div>
   )
 }
@@ -101,6 +139,12 @@ export default function NodePanel({ nodeStats, tspuBlocked }: NodePanelProps) {
       <Section title="⚡ ПРОТОКОЛЫ">
         {cap.protocols.map((t, i) => <Row key={i} icon="›" text={t} color={COL.blue} />)}
       </Section>
+
+      {NODE_ENCAP[type] && (
+        <Section title="📦 ИНКАПСУЛЯЦИЯ">
+          <Matryoshka encap={NODE_ENCAP[type]!} />
+        </Section>
+      )}
 
       {type === 'ТСПУ' && (
         <Section title="👁 DPI МОНИТОР">

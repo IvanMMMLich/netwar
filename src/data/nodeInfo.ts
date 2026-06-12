@@ -166,6 +166,86 @@ export const NODE_CAPABILITY: Record<NodeType, NodeCapability> = {
   },
 }
 
+// ─── Encapsulation view (NodePanel section) ───────────────────────────────────
+// Matryoshka layers: what each node type sees inside a packet.
+
+export interface EncapLayer {
+  label:   string      // layer name shown in the box
+  detail?: string[]    // sub-lines inside the layer
+  sees:    boolean     // [ВИДИТ] vs [СЛЕПОЙ]
+  danger?: boolean     // red highlight (e.g. SNI on ТСПУ)
+  encrypted?: boolean  // purple noise (VPN inner packet)
+}
+
+export interface NodeEncap {
+  layers: EncapLayer[]
+  explanation: string
+}
+
+export const NODE_ENCAP: Partial<Record<NodeType, NodeEncap>> = {
+  Switch: {
+    layers: [
+      { label: 'Ethernet Frame', detail: ['MAC src/dst'], sees: true },
+      { label: 'IP Packet',      sees: false },
+      { label: 'TCP Segment',    sees: false },
+    ],
+    explanation: 'Работает только с L2. Смотрит MAC-таблицу CAM и пересылает в нужный порт. IP адреса, порты и данные для него не существуют.',
+  },
+  ISP: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP Packet', detail: ['IP src: 192.168.1.x', 'IP dst: 142.250.x.x', 'TTL, Protocol'], sees: true },
+      { label: 'TCP Segment',    sees: false },
+    ],
+    explanation: 'Маршрутизирует по IP. Уменьшает TTL на 1. Смотрит таблицу маршрутов. Содержимое TCP/UDP не читает.',
+  },
+  ТСПУ: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP Packet', detail: ['IP src/dst'], sees: true },
+      { label: 'TCP/UDP Segment', detail: ['порты, флаги'], sees: true },
+      { label: 'TLS ClientHello', detail: ['SNI — имя сайта открытым текстом!'], sees: true, danger: true },
+      { label: 'HTTPS данные',   sees: false },
+    ],
+    explanation: 'DPI читает все открытые заголовки. SNI торчит наружу даже в HTTPS. Именно поэтому нужен VPN. Зашифрованный контент и ECH не видит.',
+  },
+  VPN: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP → VPN-сервер', detail: ['снаружи виден только IP VPN'], sees: true },
+      { label: '░░ ЗАШИФРОВАНО ░░', detail: ['внутри — оригинальный пакет'], sees: true, encrypted: true },
+    ],
+    explanation: 'Для ТСПУ: непрозрачный конверт. Внутри: зашифрованный оригинал. Два плеча: ты→VPN и VPN→сайт.',
+  },
+  User: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP Packet',      sees: true },
+      { label: 'TCP Segment',    sees: true },
+      { label: 'HTTP / DNS данные', sees: true },
+    ],
+    explanation: 'Источник пакета — видит всё содержимое, которое сам создал. После шифрования TLS видит только свои данные.',
+  },
+  Firewall: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP Packet', detail: ['IP src/dst'], sees: true },
+      { label: 'TCP/UDP Segment', detail: ['порты, флаги, state'], sees: true },
+      { label: 'HTTPS данные',   sees: false },
+    ],
+    explanation: 'Stateful inspection: следит за состоянием TCP-соединений и фильтрует по IP/портам. Внутрь HTTPS не заглядывает.',
+  },
+  WebServer: {
+    layers: [
+      { label: 'Ethernet Frame', sees: true },
+      { label: 'IP Packet',      sees: true },
+      { label: 'TCP Segment',    sees: true },
+      { label: 'HTTP данные (после TLS)', detail: ['терминирует TLS — видит запрос'], sees: true },
+    ],
+    explanation: 'Конечная точка TLS. Расшифровывает HTTPS и видит полный запрос. Реальный IP клиента за VPN не знает.',
+  },
+}
+
 // ─── Scenarios ────────────────────────────────────────────────────────────────
 
 export interface ScenarioStep {
