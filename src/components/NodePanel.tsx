@@ -55,7 +55,7 @@ export default function NodePanel({ nodeStats }: NodePanelProps) {
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, width: 340, height: '100vh',
+      position: 'fixed', top: 0, right: 0, width: 280, height: '100vh',
       background: COL.panel, borderLeft: `2px solid ${color}`,
       boxShadow: `-8px 0 24px ${color}22`,
       zIndex: 500, overflowY: 'auto', padding: '16px 20px',

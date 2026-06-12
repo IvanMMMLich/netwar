@@ -356,11 +356,11 @@ export default function NetworkGraph({ onNodeStats }: Props) {
 
     const sim = d3.forceSimulation<NetNode>(nodes)
       .force('link',      d3.forceLink<NetNode, NetLink>(links).id(d => d.id).distance(d => {
-        const l = d as NetLink; return l.props?.latency > 50 ? 200 : 130
+        const l = d as NetLink; return l.props?.latency > 50 ? 240 : 180
       }))
-      .force('charge',    d3.forceManyBody().strength(-350))
+      .force('charge',    d3.forceManyBody().strength(-600))
       .force('center',    d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide(52))
+      .force('collision', d3.forceCollide(56))
 
     const g = svg.append('g')
 
@@ -578,6 +578,25 @@ export default function NetworkGraph({ onNodeStats }: Props) {
       })
     zoomBehRef.current = zoom; svg.call(zoom)
 
+    // ── Initial zoom 0.75 + auto-center on the node centroid ───────────────────
+    const INITIAL_K = 0.75
+    const fitView = () => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      nodes.forEach(n => {
+        if (n.x == null || n.y == null) return
+        minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x)
+        minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y)
+      })
+      if (!isFinite(minX)) return
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+      const tx = width / 2 - INITIAL_K * cx
+      const ty = height / 2 - INITIAL_K * cy
+      const transform = d3.zoomIdentity.translate(tx, ty).scale(INITIAL_K)
+      svg.transition().duration(400).call(zoom.transform, transform)
+    }
+    // Let the simulation settle, then frame the graph.
+    const fitTimer = setTimeout(fitView, 700)
+
     // ── Animation loop ────────────────────────────────────────────────────────
     let frameCount = 0
 
@@ -721,7 +740,7 @@ export default function NetworkGraph({ onNodeStats }: Props) {
       rafRef.current = requestAnimationFrame(animLoop)
     }
     rafRef.current = requestAnimationFrame(animLoop)
-    return () => { sim.stop(); cancelAnimationFrame(rafRef.current) }
+    return () => { sim.stop(); cancelAnimationFrame(rafRef.current); clearTimeout(fitTimer) }
   }, [runDijkstra, setSelectedNode, clearOspf, setOspfSrc, setOspfDst, onNodeStats])
 
   // Watch OSPF toggle
