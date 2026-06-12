@@ -24,9 +24,7 @@ function Btn({ children, active, glow = C.green, onClick }: {
   )
 }
 
-function ZoomBtn({ label, disabled, onClick }: {
-  label: string; disabled: boolean; onClick: () => void
-}) {
+function ZoomBtn({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
   const [hov, setHov] = useState(false)
   return (
     <button disabled={disabled} onClick={onClick}
@@ -43,42 +41,38 @@ function ZoomBtn({ label, disabled, onClick }: {
 }
 
 interface Props {
-  zoom: number; onZoom: (d: number) => void
-  onToggleOspf: () => void
+  zoom: number; onZoom: (d: number) => void; onFit: () => void
 }
 
-export default function ControlBar({ zoom, onZoom, onToggleOspf }: Props) {
-  const { paused, setPaused, speed, cycleSpeed, ospfActive, setScenarioPanelOpen } = useStore()
+export default function ControlBar({ zoom, onZoom, onFit }: Props) {
+  const { paused, setPaused, speed, cycleSpeed, setScenarioPanelOpen } = useStore()
   const div = { width: 1, height: 28, background: C.border, flexShrink: 0 } as const
 
   return (
     <>
-      {/* Bottom center panel */}
       <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
         display: 'flex', alignItems: 'center', zIndex: 60 }}>
         <div style={{ background: C.panel, border: `1px solid ${C.border}`,
           display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px' }}>
-          <Btn onClick={() => setPaused(!paused)} active={paused}
-            glow={paused ? C.amber : C.green}>
+          <Btn onClick={() => setPaused(!paused)} active={paused} glow={paused ? C.amber : C.green}>
             {paused ? '▶ PLAY' : '⏸ PAUSE'}
           </Btn>
           <div style={div} />
           <Btn onClick={cycleSpeed} glow={C.blue}>{speed}x</Btn>
           <div style={div} />
-          <Btn onClick={onToggleOspf} active={ospfActive} glow={C.green}>OSPF</Btn>
+          <Btn onClick={onFit} glow={C.blue}>⊡ FIT</Btn>
           <div style={div} />
           <Btn onClick={() => setScenarioPanelOpen(true)} glow={C.purple}>SCENARIOS</Btn>
         </div>
       </div>
 
-      {/* Right edge zoom */}
       <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)',
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, zIndex: 50 }}>
         <ZoomBtn label="+" disabled={zoom >= 2} onClick={() => onZoom(0.1)} />
-        <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 14, color: '#7a9ab8',
+        <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 12, color: '#7a9ab8',
           background: '#0d1424', border: `1.5px solid ${C.border}`, width: 48, height: 48,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          userSelect: 'none', letterSpacing: '-0.02em' }}>{zoom.toFixed(1)}</div>
+          userSelect: 'none', letterSpacing: '-0.04em' }}>{zoom.toFixed(1)}</div>
         <ZoomBtn label="−" disabled={zoom <= 0.5} onClick={() => onZoom(-0.1)} />
       </div>
     </>

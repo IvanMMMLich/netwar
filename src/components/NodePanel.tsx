@@ -1,6 +1,6 @@
 import React from 'react'
 import { useStore } from '../store'
-import { NODE_COLOR, NODE_LABEL, NODE_FULL_LABEL, NODE_TYPE_MAP } from '../data/topology'
+import { NODE_COLOR, NODE_FULL_LABEL, NODE_TYPE_MAP, NODE_MAP } from '../data/topology'
 import { NODE_CAPABILITY } from '../data/nodeInfo'
 
 const COL = {
@@ -40,14 +40,16 @@ function Row({ icon, text, color }: { icon: string; text: string; color: string 
 
 interface NodePanelProps {
   nodeStats: Map<string, { passed: number; blocked: number }>
+  tspuBlocked: number
 }
 
-export default function NodePanel({ nodeStats }: NodePanelProps) {
+export default function NodePanel({ nodeStats, tspuBlocked }: NodePanelProps) {
   const { selectedNodeId, setSelectedNode } = useStore()
   if (!selectedNodeId) return null
 
+  const node = NODE_MAP.get(selectedNodeId)
   const type = NODE_TYPE_MAP.get(selectedNodeId)
-  if (!type) return null
+  if (!node || !type) return null
 
   const color = NODE_COLOR[type]
   const cap   = NODE_CAPABILITY[type]
@@ -55,7 +57,7 @@ export default function NodePanel({ nodeStats }: NodePanelProps) {
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, width: 280, height: '100vh',
+      position: 'fixed', top: 0, right: 0, width: 300, height: '100vh',
       background: COL.panel, borderLeft: `2px solid ${color}`,
       boxShadow: `-8px 0 24px ${color}22`,
       zIndex: 500, overflowY: 'auto', padding: '16px 20px',
@@ -69,16 +71,16 @@ export default function NodePanel({ nodeStats }: NodePanelProps) {
           <div style={{
             width: 36, height: 36, border: `2px solid ${color}`, background: `${color}18`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: '"Press Start 2P", cursive', fontSize: 9, color,
+            fontFamily: '"Press Start 2P", cursive', fontSize: node.label.length > 3 ? 7 : 9, color,
             boxShadow: `0 0 8px ${color}55`,
-          }}>{NODE_LABEL[type]}</div>
+          }}>{node.label}</div>
           <div>
             <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color,
               textShadow: `0 0 8px ${color}` }}>
               {NODE_FULL_LABEL[type]}
             </div>
             <div style={{ fontSize: 10, color: COL.dim, marginTop: 4 }}>
-              {selectedNodeId}
+              {node.sublabel}
             </div>
           </div>
         </div>
@@ -100,9 +102,16 @@ export default function NodePanel({ nodeStats }: NodePanelProps) {
         {cap.protocols.map((t, i) => <Row key={i} icon="›" text={t} color={COL.blue} />)}
       </Section>
 
+      {type === 'ТСПУ' && (
+        <Section title="👁 DPI МОНИТОР">
+          <Row icon="›" text="СЕЙЧАС ЧИТАЕТ: IP / SNI / DNS-запросы" color={COL.amber} />
+          <Row icon="›" text={`ЗАБЛОКИРОВАНО СЕГОДНЯ: ${tspuBlocked}`} color={COL.red} />
+        </Section>
+      )}
+
       <Section title="📊 СТАТУС">
         <Row icon="›" text={`Пакетов прошло:    ${stats.passed}`}   color={COL.green} />
-        <Row icon="›" text={`Пакетов заблокировано: ${stats.blocked}`} color={COL.red} />
+        <Row icon="›" text={`Заблокировано:     ${stats.blocked}`} color={COL.red} />
       </Section>
     </div>
   )

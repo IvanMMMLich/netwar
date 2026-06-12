@@ -6,160 +6,163 @@ export interface NodeCapability {
   protocols: string[]
 }
 
+
 export const NODE_CAPABILITY: Record<NodeType, NodeCapability> = {
   User: {
     can: [
       'Инициировать HTTP/HTTPS запросы',
       'Отправлять DNS-запросы',
-      'Устанавливать VPN-туннель',
+      'Поднять VPN-туннель для обхода',
       'Выбирать DNS-резолвер (DoH/DoT)',
     ],
     cannot: [
-      'Читать трафик других пользователей',
-      'Маршрутизировать пакеты',
-      'Обходить ТСПУ без VPN/прокси',
+      'Маршрутизировать чужой трафик',
+      'Обойти ТСПУ без VPN/прокси',
+      'Видеть трафик других юзеров',
     ],
-    protocols: ['HTTP/1.1', 'HTTPS / TLS 1.3', 'DNS UDP 53', 'DoH HTTPS 443', 'WireGuard UDP', 'VLESS TCP'],
+    protocols: ['HTTP/1.1', 'HTTPS / TLS 1.3', 'DNS UDP 53', 'WireGuard / VLESS'],
   },
   Switch: {
     can: [
       'Пересылать фреймы по MAC-адресу',
       'Строить таблицу CAM',
       'Поддерживать VLAN (802.1Q)',
-      'Делать flood для неизвестных MAC',
     ],
     cannot: [
-      'Читать IP-заголовки',
-      'Выполнять маршрутизацию',
-      'Видеть содержимое TCP/UDP',
-      'Фильтровать трафик по домену',
+      'Читать IP-заголовки (L3)',
+      'Маршрутизировать пакеты',
+      'Фильтровать по домену',
     ],
-    protocols: ['Ethernet (L2)', '802.1Q VLAN', 'STP / RSTP', 'LLDP'],
+    protocols: ['Ethernet (L2)', '802.1Q VLAN', 'STP / RSTP'],
   },
   ISP: {
     can: [
       'Маршрутизировать пакеты по IP',
-      'Видеть source и destination IP',
+      'Видеть src/dst IP адреса',
       'Выполнять NAT',
-      'Менять маршруты через BGP',
+      'Зеркалировать трафик в ТСПУ',
     ],
     cannot: [
       'Читать TCP payload без MITM',
-      'Расшифровать HTTPS',
-      'Видеть содержимое VPN-туннеля',
+      'Расшифровать HTTPS / VPN',
       'Видеть SNI в ECH',
     ],
-    protocols: ['IP / IPv6', 'BGP (между AS)', 'OSPF (внутри AS)', 'ICMP', 'NAT'],
+    protocols: ['IP / IPv6', 'BGP', 'OSPF', 'NAT'],
   },
   ТСПУ: {
     can: [
-      'Читать IP src/dst заголовки',
-      'Читать TCP/UDP порты',
+      'Читать IP src/dst',
       'Читать SNI в TLS ClientHello',
       'Читать незашифрованные DNS',
       'Блокировать по IP и домену',
-      'Подменять DNS-ответы',
       'Инжектировать TCP RST',
+      'Подменять DNS-ответы',
     ],
     cannot: [
       'Расшифровать HTTPS контент',
       'Видеть внутренний IP в VPN',
-      'Читать SNI в ECH (зашифрован)',
+      'Читать SNI в ECH',
       'Читать DoH/DoT запросы',
-      'Блокировать неизвестные IP VPN',
     ],
-    protocols: ['DPI (L3-L7)', 'IP / TCP / UDP', 'DNS перехват', 'HTTPS SNI анализ'],
+    protocols: ['DPI (L3-L7)', 'IP / TCP / UDP', 'DNS перехват', 'SNI анализ'],
   },
   VPN: {
     can: [
       'Шифровать весь трафик в туннель',
       'Скрыть реальный IP назначения',
-      'Заменить IP-заголовок',
-      'Обойти SNI-инспекцию',
-      'Обойти DNS-блокировку ISP',
+      'Заменить внешний IP-заголовок',
+      'Обойти SNI и DNS блокировку',
     ],
     cannot: [
       'Скрыть факт использования VPN',
-      'Защитить от утечек DNS',
       'Гарантировать анонимность',
-      'Работать если IP заблокирован',
+      'Работать если IP сервера заблокирован',
     ],
-    protocols: ['WireGuard UDP 51820', 'VLESS TCP 443', 'Shadowsocks TCP/UDP', 'OpenVPN UDP 1194'],
+    protocols: ['WireGuard UDP 51820', 'VLESS TCP 443', 'Shadowsocks', 'OpenVPN'],
   },
   Firewall: {
     can: [
-      'Фильтровать по IP, порту, протоколу',
-      'Выполнять stateful inspection',
+      'Фильтровать по IP/порту/протоколу',
+      'Stateful inspection',
       'Блокировать нежелательные соединения',
-      'Делать NAT / PAT',
     ],
     cannot: [
       'Расшифровать HTTPS без MITM',
-      'Анализировать зашифрованный контент',
       'Видеть реальный IP за VPN',
     ],
-    protocols: ['iptables / nftables', 'IP / TCP / UDP', 'ICMP', 'Stateful TCP'],
+    protocols: ['iptables / nftables', 'IP / TCP / UDP', 'Stateful TCP'],
   },
   WebServer: {
     can: [
       'Принимать HTTP/HTTPS запросы',
-      'Терминировать TLS (HTTPS)',
-      'Отдавать контент клиентам',
-      'Логировать все соединения',
+      'Терминировать TLS',
+      'Отдавать контент',
+      'Логировать соединения',
     ],
     cannot: [
-      'Знать реальный IP клиента за VPN/NAT',
-      'Предотвратить DDoS без защиты',
+      'Знать реальный IP клиента за VPN',
+      'Остановить DDoS без защиты',
     ],
-    protocols: ['HTTP/1.1', 'HTTP/2', 'HTTPS / TLS 1.3', 'WebSocket'],
+    protocols: ['HTTP/1.1', 'HTTP/2', 'HTTPS / TLS 1.3'],
+  },
+  DNS_Stub: {
+    can: [
+      'Формировать DNS-запрос на компе',
+      'Кэшировать ответы локально',
+      'Направлять запрос рекурсору',
+    ],
+    cannot: [
+      'Рекурсивно обходить иерархию',
+      'Знать IP без резолвера',
+    ],
+    protocols: ['DNS UDP 53', 'getaddrinfo()', 'systemd-resolved'],
   },
   DNS_R: {
     can: [
-      'Принимать DNS-запросы от клиентов',
-      'Кэшировать ответы',
+      'Принимать запросы клиентов',
       'Рекурсивно опрашивать иерархию',
+      'Кэшировать ответы',
       'Поддерживать DoH / DoT',
     ],
     cannot: [
-      'Гарантировать подлинность без DNSSEC',
-      'Скрыть запросы от ISP (обычный DNS)',
+      'Подтвердить подлинность без DNSSEC',
+      'Скрыть запрос от ISP (обычный DNS)',
     ],
-    protocols: ['DNS UDP 53', 'DNS TCP 53', 'DoH HTTPS 443', 'DoT TLS 853', 'DNSSEC'],
+    protocols: ['DNS UDP/TCP 53', 'DoH 443', 'DoT 853', 'DNSSEC'],
   },
   DNS_ROOT: {
     can: [
       'Указывать на TLD-серверы',
-      'Обрабатывать все TLD (.com/.ru/...)',
-      'Участвовать в DNSSEC цепочке',
+      'Обрабатывать любой TLD',
+      'Работать через Anycast (13 кластеров)',
     ],
     cannot: [
       'Знать реальные IP сайтов',
-      'Кэшировать большинство ответов',
+      'Кэшировать ответы надолго',
     ],
     protocols: ['DNS UDP 53', 'DNSSEC', 'Anycast'],
   },
   DNS_TLD: {
     can: [
       'Указывать на авторитативные NS',
-      'Обрабатывать зоны .com .net .ru',
-      'Поддерживать DNSSEC для зоны',
+      'Обрабатывать зону (.com/.ru)',
+      'Поддерживать DNSSEC зоны',
     ],
     cannot: [
-      'Знать реальные IP сайтов',
+      'Знать реальные A-записи сайтов',
     ],
     protocols: ['DNS UDP 53', 'DNSSEC'],
   },
   DNS_AUTH: {
     can: [
       'Возвращать реальный IP домена',
-      'Хранить A/AAAA/MX/CNAME/TXT записи',
-      'Поддерживать DNSSEC подписи',
+      'Хранить A/AAAA/MX/CNAME/TXT',
+      'Подписывать ответы DNSSEC',
     ],
     cannot: [
-      'Быть доступен без прохождения цепочки',
-      'Скрыть IP от ISP при обычном DNS',
+      'Быть найден без прохода иерархии',
     ],
-    protocols: ['DNS UDP 53', 'DNSSEC', 'DNS TCP 53'],
+    protocols: ['DNS UDP/TCP 53', 'DNSSEC'],
   },
 }
 
