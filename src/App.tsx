@@ -28,7 +28,7 @@ export default function App() {
 
       <div style={{ ...HUD, top: 16, left: 16, color: '#00e676',
         textShadow: '0 0 8px #00e676, 0 0 16px #00e67666' }}>
-        SYS::NETWAR v0.3.0
+        SYS::NETWAR v0.4.0
       </div>
       <div style={{ ...HUD, top: 16, right: panelOpen ? PANEL_WIDTH + 16 : 16, color: '#00b4ff',
         textShadow: '0 0 8px #00b4ff, 0 0 16px #00b4ff66', transition: 'right 0.25s ease' }}>
