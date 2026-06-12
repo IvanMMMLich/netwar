@@ -114,8 +114,11 @@ function EdgeCard({ tip, cref }: {
   const tType = NODE_TYPE_MAP.get(edge.target) ?? edge.target
   const bars  = Math.round(util / 10)
   const bar   = '█'.repeat(bars) + '░'.repeat(10 - bars)
-  const uColor = utilColor(util)
-  const cardW = 320; const cardH = 250; const PAD = 14
+  // threshold colouring per ARCHITECTURE.md block 1
+  const latColor  = p.latency > 100 ? '#ff4444' : p.latency > 50 ? '#ffb300' : '#c8d8f0'
+  const lossColor = p.loss > 1 ? '#ff4444' : p.loss > 0 ? '#ffb300' : '#c8d8f0'
+  const uColor    = util > 80 ? '#ff4444' : util > 60 ? '#ffb300' : utilColor(util)
+  const cardW = 340; const cardH = 360; const PAD = 14
   const rect = cref.current?.getBoundingClientRect()
   const cw = rect?.width ?? window.innerWidth; const ch = rect?.height ?? window.innerHeight
   let left = tip.x + PAD; let top = tip.y + PAD
@@ -133,21 +136,34 @@ function EdgeCard({ tip, cref }: {
       </div>
       <div style={{ borderTop: '1px solid #1e2d4a', margin: '8px 0' }} />
       {[
-        { k: 'BW',      v: bwLabel(p.bandwidth) },
-        { k: 'LATENCY', v: `${p.latency} мс` },
-        { k: 'LOSS',    v: `${p.loss}%` },
-        { k: 'UTIL',    v: <span style={{ color: uColor }}>{bar} {util.toFixed(0)}%</span> },
-      ].map(({ k, v }) => (
-        <div key={k} style={{ display: 'flex', gap: 8,
-          fontFamily: '"Share Tech Mono", monospace', fontSize: 11, lineHeight: '1.9' }}>
-          <span style={{ color: '#4a6a8a', minWidth: 72, flexShrink: 0 }}>{k}:</span>
-          <span style={{ color: '#c8d8f0' }}>{v}</span>
+        { k: 'BW',      v: <span style={{ color: '#c8d8f0' }}>{bwLabel(p.bandwidth)}</span>,
+          hint: 'пропускная способность канала' },
+        { k: 'LATENCY', v: <span style={{ color: latColor }}>{p.latency} мс</span>,
+          hint: 'задержка передачи пакета' },
+        { k: 'LOSS',    v: <span style={{ color: lossColor }}>{p.loss}%</span>,
+          hint: 'процент потерянных пакетов' },
+        { k: 'UTIL',    v: <span style={{ color: uColor }}>{bar} {util.toFixed(0)}%</span>,
+          hint: 'текущая загрузка канала' },
+      ].map(({ k, v, hint }) => (
+        <div key={k} style={{ marginBottom: 4 }}>
+          <div style={{ display: 'flex', gap: 8,
+            fontFamily: '"Share Tech Mono", monospace', fontSize: 11, lineHeight: '1.7' }}>
+            <span style={{ color: '#4a6a8a', minWidth: 72, flexShrink: 0 }}>{k}:</span>
+            {v}
+          </div>
+          <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 9,
+            color: '#5a7090', paddingLeft: 80, lineHeight: '1.4' }}>
+            → {hint}
+          </div>
         </div>
       ))}
       <div style={{ borderTop: '1px solid #1e2d4a', margin: '8px 0' }} />
       <div style={{ fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: '#4a6a8a' }}>
         OSPF COST: <span style={{ color: '#00e676' }}>{ospfCost(p.bandwidth)}</span>
-        <div style={{ fontSize: 9, marginTop: 2 }}>(Cost = 100M / BW)</div>
+        <div style={{ fontSize: 9, marginTop: 3, color: '#5a7090', lineHeight: '1.5' }}>
+          → чем меньше → тем предпочтительнее маршрут<br />
+          → (формула: Cost = 100 000 000 / BW в бит/с)
+        </div>
       </div>
     </div>
   )
