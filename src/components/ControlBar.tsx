@@ -42,9 +42,10 @@ function ZoomBtn({ label, disabled, onClick }: { label: string; disabled: boolea
 
 interface Props {
   zoom: number; onZoom: (d: number) => void; onFit: () => void
+  onToggleOspf: () => void; ospfActive: boolean
 }
 
-export default function ControlBar({ zoom, onZoom, onFit }: Props) {
+export default function ControlBar({ zoom, onZoom, onFit, onToggleOspf, ospfActive }: Props) {
   const { paused, setPaused, speed, cycleSpeed, setScenarioPanelOpen } = useStore()
   const div = { width: 1, height: 28, background: C.border, flexShrink: 0 } as const
 
@@ -59,6 +60,8 @@ export default function ControlBar({ zoom, onZoom, onFit }: Props) {
           </Btn>
           <div style={div} />
           <Btn onClick={cycleSpeed} glow={C.blue}>{speed}x</Btn>
+          <div style={div} />
+          <Btn onClick={onToggleOspf} active={ospfActive} glow={C.green}>OSPF</Btn>
           <div style={div} />
           <Btn onClick={onFit} glow={C.blue}>⊡ FIT</Btn>
           <div style={div} />

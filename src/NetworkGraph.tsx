@@ -41,6 +41,47 @@ function segDuration(a: string, b: string): number {
 
 function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3) }
 
+// ─── OSPF: Dijkstra over EDGES ───────────────────────────────────────────────────
+
+const ALL_NODE_IDS = NODES.map(n => n.id)
+
+function dijkstra(
+  weights: Map<string, number>, failed: Set<string>, src: string, dst: string,
+): { path: string[]; cost: number } | null {
+  const dist = new Map<string, number>(ALL_NODE_IDS.map(n => [n, Infinity]))
+  const prev = new Map<string, string>()
+  const unvisited = new Set(ALL_NODE_IDS)
+  dist.set(src, 0)
+  while (unvisited.size) {
+    let u = ''; let min = Infinity
+    for (const n of unvisited) { const d = dist.get(n)!; if (d < min) { min = d; u = n } }
+    if (!u || min === Infinity) break
+    if (u === dst) break
+    unvisited.delete(u)
+    for (const e of EDGES) {
+      if (failed.has(e.id)) continue
+      const nb = e.source === u ? e.target : e.target === u ? e.source : null
+      if (!nb || !unvisited.has(nb)) continue
+      const alt = dist.get(u)! + (weights.get(e.id) ?? 10)
+      if (alt < dist.get(nb)!) { dist.set(nb, alt); prev.set(nb, u) }
+    }
+  }
+  if (dist.get(dst) === Infinity) return null
+  const path: string[] = []; let cur: string | undefined = dst
+  while (cur) { path.unshift(cur); cur = prev.get(cur) }
+  return { path, cost: dist.get(dst)! }
+}
+
+// edge ids that lie on a node path
+function pathEdgeIds(path: string[]): Set<string> {
+  const s = new Set<string>()
+  for (let i = 0; i < path.length - 1; i++) {
+    const e = EDGE_BY_PAIR.get(pairKey(path[i], path[i + 1]))
+    if (e) s.add(e.id)
+  }
+  return s
+}
+
 // ─── Counters HUD ───────────────────────────────────────────────────────────────
 
 function Counters({ c }: { c: { delivered: number; blocked: number; dns: number; vpn: number } }) {
@@ -176,6 +217,51 @@ function EventLog({ entries }: { entries: string[] }) {
   )
 }
 
+// ─── OSPF badge / banner ─────────────────────────────────────────────────────────
+
+function OspfBadge() {
+  return (
+    <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+      fontFamily: '"Share Tech Mono", monospace', fontSize: 12, letterSpacing: '0.15em',
+      color: '#00e676', textShadow: '0 0 8px #00e676',
+      background: '#070b14', border: '1px solid #00e67644', padding: '4px 16px',
+      zIndex: 60, pointerEvents: 'none' }}>
+      OSPF::ACTIVE&nbsp;&nbsp;|&nbsp;&nbsp;AREA 0&nbsp;&nbsp;|&nbsp;&nbsp;МЕТРИКА: COST
+    </div>
+  )
+}
+
+function OspfBanner({ path, cost }: { path: string[]; cost: number }) {
+  const names = path.map(id => NODE_MAP.get(id)?.label ?? id).join(' → ')
+  return (
+    <div style={{ position: 'absolute', top: 52, left: '50%', transform: 'translateX(-50%)',
+      fontFamily: '"Share Tech Mono", monospace', fontSize: 11, color: '#00e676',
+      background: '#0d1424', border: '1.5px solid #00e676', boxShadow: '0 0 14px #00e67644',
+      padding: '6px 16px', zIndex: 60, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+      МАРШРУТ OSPF&nbsp;|&nbsp;{names}&nbsp;|&nbsp;ВЕС: {cost}
+    </div>
+  )
+}
+
+function WeightEditor({ edge, onCommit, onCancel }: {
+  edge: { id: string; x: number; y: number; value: string }
+  onCommit: (id: string, v: number) => void; onCancel: () => void
+}) {
+  const [val, setVal] = useState(edge.value)
+  return (
+    <input autoFocus value={val} onChange={e => setVal(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { const n = parseInt(val, 10); if (!isNaN(n) && n > 0 && n <= 100) onCommit(edge.id, n); else onCancel() }
+        if (e.key === 'Escape') onCancel()
+      }}
+      onBlur={onCancel}
+      style={{ position: 'absolute', left: edge.x - 24, top: edge.y - 14, width: 52, height: 28,
+        zIndex: 300, fontFamily: '"Press Start 2P", cursive', fontSize: 9,
+        background: '#0d1424', border: '1.5px solid #00e676', color: '#00e676',
+        textAlign: 'center', outline: 'none', boxShadow: '0 0 10px #00e67666' }} />
+  )
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -202,6 +288,20 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const edgeSelRef = useRef<d3.Selection<SVGGElement, NetEdge, SVGGElement, unknown> | null>(null)
   const pktGroupRef   = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
   const shardGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const wgtGroupRef   = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const wgtSelRef     = useRef<d3.Selection<SVGGElement, NetEdge, SVGGElement, unknown> | null>(null)
+
+  // ── OSPF refs ──
+  const edgeWeightsRef = useRef<Map<string, number>>(
+    new Map(EDGES.map(e => [e.id, Math.min(100, Math.max(1, ospfCost(e.props.bandwidth)))]))
+  )
+  const failedEdgesRef = useRef<Set<string>>(new Set())
+  const ospfPathIdsRef = useRef<Set<string>>(new Set())
+  const ospfActiveRef  = useRef(false)
+  const ospfSrcRef     = useRef<string | null>(null)
+  const ospfDstRef     = useRef<string | null>(null)
+  const styleEdgesRef  = useRef<() => void>(() => {})
+  const updateRingsRef = useRef<() => void>(() => {})
 
   const nextIdRef = useRef(0)
   const lastSpawnRef = useRef(0)
@@ -213,8 +313,13 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const { paused, speed, selectedNodeId } = useStore()
   const isPausedRef = useRef(false)
   const speedRef    = useRef(1)
+  // OSPF store
+  const { ospfActive, setOspfActive, ospfSrcId, ospfDstId, setOspfSrc, setOspfDst, clearOspf } = useStore()
   useEffect(() => { isPausedRef.current = paused }, [paused])
   useEffect(() => { speedRef.current = speed }, [speed])
+  useEffect(() => { ospfActiveRef.current = ospfActive }, [ospfActive])
+  useEffect(() => { ospfSrcRef.current = ospfSrcId }, [ospfSrcId])
+  useEffect(() => { ospfDstRef.current = ospfDstId }, [ospfDstId])
 
   const [zoomLevel, setZoomLevel] = useState(1)
   const [counters, setCounters]   = useState({ delivered: 0, blocked: 0, dns: 0, vpn: 0 })
@@ -222,6 +327,8 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const [nodeTip, setNodeTip]     = useState<{ x: number; y: number; node: NetNode } | null>(null)
   const [statsState, setStatsState] = useState<Map<string, { passed: number; blocked: number }>>(new Map())
   const [log, setLog] = useState<string[]>([])
+  const [ospfPath, setOspfPath]   = useState<{ nodes: string[]; cost: number } | null>(null)
+  const [editingEdge, setEditingEdge] = useState<{ id: string; x: number; y: number; value: string } | null>(null)
 
   const pos = (id: string) => { const n = NODE_MAP.get(id)!; return { x: n.x, y: n.y } }
 
@@ -248,6 +355,37 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     packetsRef.current.push(p)
     bounce(p.nodes[0], 200, 0.2)   // User bounce on send
   }, [bounce])
+
+  // ── OSPF: recompute shortest path between selected source / dest ──
+  const runDijkstra = useCallback(() => {
+    const src = ospfSrcRef.current, dst = ospfDstRef.current
+    if (!src || !dst) { ospfPathIdsRef.current = new Set(); setOspfPath(null); styleEdgesRef.current(); return }
+    const res = dijkstra(edgeWeightsRef.current, failedEdgesRef.current, src, dst)
+    if (res && res.path.length > 1) {
+      ospfPathIdsRef.current = pathEdgeIds(res.path)
+      setOspfPath({ nodes: res.path, cost: res.cost })
+    } else {
+      ospfPathIdsRef.current = new Set(); setOspfPath(null)
+    }
+    styleEdgesRef.current()
+  }, [])
+
+  useEffect(() => { if (ospfActive) runDijkstra() }, [ospfSrcId, ospfDstId, ospfActive, runDijkstra])
+
+  const toggleOspf = useCallback(() => {
+    const next = !ospfActiveRef.current
+    setOspfActive(next)
+    if (next) { useStore.getState().setSelectedNode(null) }   // close side panel
+    else { clearOspf(); setOspfPath(null); ospfPathIdsRef.current = new Set() }
+    // styling/visibility updates happen via the ospfActive effect below
+  }, [setOspfActive, clearOspf])
+
+  const commitWeight = useCallback((id: string, v: number) => {
+    edgeWeightsRef.current.set(id, v)
+    setEditingEdge(null)
+    runDijkstra()
+    if (wgtSelRef.current) wgtSelRef.current.select('text').text((d: NetEdge) => String(edgeWeightsRef.current.get(d.id) ?? '?'))
+  }, [runDijkstra])
 
   // ── Build the static scene once ────────────────────────────────────────────
   useEffect(() => {
@@ -292,6 +430,43 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       })
       .on('mouseleave', () => setEdgeTip(null))
 
+    // OSPF: long-press a link (500ms) to break it; click a broken link to restore.
+    const lpTimers = new Map<string, ReturnType<typeof setTimeout>>()
+    edgeSel
+      .on('mousedown', function(event: MouseEvent, d) {
+        if (!ospfActiveRef.current || failedEdgesRef.current.has(d.id)) return
+        event.stopPropagation()   // don't let d3-zoom start a pan; keep the long-press alive
+        const tm = setTimeout(() => {
+          lpTimers.delete(d.id)
+          failedEdgesRef.current.add(d.id)
+          // drop packets currently on the broken edge (with ✕ shards)
+          packetsRef.current = packetsRef.current.filter(p => {
+            const e = EDGE_BY_PAIR.get(pairKey(p.nodes[p.seg], p.nodes[p.seg + 1]))
+            if (e && e.id === d.id) { dropShards(p); return false }
+            return true
+          })
+          const sl = NODE_MAP.get(d.source)?.label ?? d.source
+          const tl = NODE_MAP.get(d.target)?.label ?? d.target
+          const reconv = 100 + Math.floor(Math.random() * 400)
+          setLog(prev => [`⚠ LINK DOWN: ${sl}→${tl} | OSPF RECONVERGE: ${reconv}ms`, ...prev].slice(0, 3))
+          runDijkstra(); styleEdgesRef.current()
+        }, 500)
+        lpTimers.set(d.id, tm)
+      })
+      .on('mouseup mouseleave', function(_event: MouseEvent, d) {
+        const tm = lpTimers.get(d.id); if (tm) { clearTimeout(tm); lpTimers.delete(d.id) }
+      })
+      .on('click', function(_event: MouseEvent, d) {
+        if (!ospfActiveRef.current) return
+        if (failedEdgesRef.current.has(d.id)) {
+          failedEdgesRef.current.delete(d.id)
+          const sl = NODE_MAP.get(d.source)?.label ?? d.source
+          const tl = NODE_MAP.get(d.target)?.label ?? d.target
+          setLog(prev => [`✓ LINK UP: ${sl}→${tl}`, ...prev].slice(0, 3))
+          runDijkstra(); styleEdgesRef.current()
+        }
+      })
+
     // Position edges (trim endpoints so arrow clears node)
     edgeSel.each(function(d) {
       const s = pos(d.source); const t = pos(d.target)
@@ -307,6 +482,28 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     // ── Packet & shard layers ──
     const pktGroup   = g.append('g'); pktGroupRef.current = pktGroup
     const shardGroup = g.append('g'); shardGroupRef.current = shardGroup
+
+    // ── OSPF weight labels (visible only in OSPF mode) ──
+    const wgtGroup = g.append('g').attr('class', 'weights').attr('opacity', 0)
+      .style('display', 'none')
+    wgtGroupRef.current = wgtGroup
+    const wgtSel = wgtGroup.selectAll<SVGGElement, NetEdge>('g').data(EDGES).join('g')
+      .style('cursor', 'text')
+      .attr('transform', d => { const s = pos(d.source), t = pos(d.target); return `translate(${(s.x + t.x) / 2},${(s.y + t.y) / 2})` })
+    wgtSelRef.current = wgtSel
+    wgtSel.append('rect').attr('x', -15).attr('y', -10).attr('width', 30).attr('height', 20).attr('rx', 2)
+      .attr('fill', '#0d1424').attr('stroke', '#00b4ff').attr('stroke-width', 1)
+    wgtSel.append('text').attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
+      .attr('fill', '#00b4ff').attr('font-family', '"Press Start 2P", cursive').attr('font-size', '8px')
+      .style('pointer-events', 'none')
+      .text(d => String(edgeWeightsRef.current.get(d.id) ?? '?'))
+    wgtSel.on('mousedown', function(event: MouseEvent, d) {
+      if (!ospfActiveRef.current) return
+      event.stopPropagation()
+      const r = cref.current!.getBoundingClientRect()
+      setEditingEdge({ id: d.id, x: event.clientX - r.left, y: event.clientY - r.top,
+        value: String(edgeWeightsRef.current.get(d.id) ?? 10) })
+    })
 
     // ── Nodes ──
     const nodeSel = g.append('g').selectAll<SVGGElement, NetNode>('g.node')
@@ -354,6 +551,15 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
 
     nodeSel
       .on('click', (_e: MouseEvent, d) => {
+        if (ospfActiveRef.current) {
+          // OSPF mode: pick SOURCE then DESTINATION
+          const st = useStore.getState()
+          if (!ospfSrcRef.current)            st.setOspfSrc(d.id)
+          else if (ospfSrcRef.current === d.id) { st.clearOspf() }
+          else                                st.setOspfDst(d.id)
+          updateRingsRef.current()
+          return
+        }
         useStore.getState().setSelectedNode(useStore.getState().selectedNodeId === d.id ? null : d.id)
       })
       .on('mouseenter', function(event: MouseEvent, d) {
@@ -368,6 +574,41 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
         setNodeTip(null)
       })
+
+    // ── OSPF edge styling + node selection rings ──
+    styleEdgesRef.current = () => {
+      if (!edgeSelRef.current) return
+      const active = ospfActiveRef.current
+      const path   = ospfPathIdsRef.current
+      edgeSelRef.current.select('.edge-line')
+        .attr('stroke', (d: NetEdge) => {
+          if (failedEdgesRef.current.has(d.id)) return '#ff4444'
+          if (active && path.has(d.id))         return '#00e676'
+          if (active)                            return d.color ?? '#1e2d4a'
+          return d.color ?? utilColor(edgeUtilRef.current.get(d.id) ?? 0)
+        })
+        .attr('stroke-opacity', (d: NetEdge) => {
+          if (!active || path.size === 0) return 1
+          return path.has(d.id) || failedEdgesRef.current.has(d.id) ? 1 : 0.2
+        })
+        .attr('stroke-width', (d: NetEdge) => {
+          const w = bwWidth(d.props.bandwidth)
+          return active && path.has(d.id) ? w + 1.5 : w
+        })
+        .attr('stroke-dasharray', (d: NetEdge) =>
+          failedEdgesRef.current.has(d.id) ? '6 5' : (d.dashed ? '8 5' : null))
+    }
+    updateRingsRef.current = () => {
+      if (!nodeSelRef.current) return
+      nodeSelRef.current.select('.sel-ring').attr('stroke', (d: NetNode) => {
+        if (ospfActiveRef.current) {
+          if (d.id === ospfSrcRef.current) return '#00e676'
+          if (d.id === ospfDstRef.current) return '#00b4ff'
+          return 'transparent'
+        }
+        return d.id === useStore.getState().selectedNodeId ? NODE_COLOR[d.type] : 'transparent'
+      })
+    }
 
     // ── Zoom ──
     const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -401,7 +642,10 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       const edgeLoad = new Map<string, number>()
       for (const p of pkts) {
         const a = p.nodes[p.seg], b = p.nodes[p.seg + 1]
-        if (b) { const e = EDGE_BY_PAIR.get(pairKey(a, b)); if (e) edgeLoad.set(e.id, (edgeLoad.get(e.id) ?? 0) + 1) }
+        const segEdge = b ? EDGE_BY_PAIR.get(pairKey(a, b)) : undefined
+        if (segEdge) edgeLoad.set(segEdge.id, (edgeLoad.get(segEdge.id) ?? 0) + 1)
+        // OSPF: drop packets traversing a broken link
+        if (segEdge && failedEdgesRef.current.has(segEdge.id)) { dropShards(p); continue }
         if (frozen) { survivors.push(p); continue }
         const dur = segDuration(a, b) / spd
         p.segElapsed += dt
@@ -448,7 +692,9 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const cur = edgeUtilRef.current.get(e.id) ?? 0
           edgeUtilRef.current.set(e.id, cur + 0.1 * (target - cur))
         }
-        if (edgeSelRef.current) {
+        // In OSPF mode the path/failure colouring takes priority over utilisation.
+        if (ospfActiveRef.current) styleEdgesRef.current()
+        else if (edgeSelRef.current) {
           edgeSelRef.current.select('.edge-line').attr('stroke', (d: NetEdge) => {
             if (d.color) return d.color
             return utilColor(edgeUtilRef.current.get(d.id) ?? 0)
@@ -538,6 +784,20 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       }
     }
 
+    // drop a packet mid-flight on a broken link (✕ burst at its position)
+    function dropShards(p: Packet) {
+      const a = p.nodes[p.seg], b = p.nodes[p.seg + 1]
+      if (!b) return
+      const pa = pos(a), pb = pos(b)
+      const t = Math.min(p.segElapsed / (segDuration(a, b) / speedRef.current), 1)
+      const x = pa.x + (pb.x - pa.x) * t, y = pa.y + (pb.y - pa.y) * t
+      const dirs = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+      for (const [dx, dy] of dirs) {
+        shardsRef.current.push({ x, y, vx: dx * 0.08, vy: dy * 0.08,
+          start: performance.now(), color: '#ff4444' })
+      }
+    }
+
     rafRef.current = requestAnimationFrame(loop)
 
     // resize handling
@@ -565,19 +825,31 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
 
   // ── Selection ring sync ──
   useEffect(() => {
-    if (!nodeSelRef.current) return
+    if (!nodeSelRef.current || ospfActive) return
     nodeSelRef.current.select('.sel-ring').attr('stroke', (d: NetNode) =>
       d.id === selectedNodeId ? NODE_COLOR[d.type] : 'transparent')
-  }, [selectedNodeId])
+  }, [selectedNodeId, ospfActive])
+
+  // ── OSPF mode reactivity: weight visibility, edge styling, rings ──
+  useEffect(() => {
+    if (wgtGroupRef.current) {
+      wgtGroupRef.current.style('display', ospfActive ? 'inline' : 'none').attr('opacity', ospfActive ? 1 : 0)
+    }
+    styleEdgesRef.current()
+    updateRingsRef.current()
+  }, [ospfActive, ospfSrcId, ospfDstId, ospfPath])
 
   return (
     <div ref={cref} className="w-full h-full" style={{ position: 'relative' }}>
       <svg ref={svgRef} className="w-full h-full" style={{ background: 'transparent' }} />
       {edgeTip && <EdgeCard tip={edgeTip} cref={cref} />}
       {nodeTip && <NodeTip tip={nodeTip} cref={cref} stats={statsState} />}
+      {ospfActive && <OspfBadge />}
+      {ospfActive && ospfPath && <OspfBanner path={ospfPath.nodes} cost={ospfPath.cost} />}
+      {editingEdge && <WeightEditor edge={editingEdge} onCommit={commitWeight} onCancel={() => setEditingEdge(null)} />}
       <EventLog entries={log} />
       <Counters c={counters} />
-      <ControlBar zoom={zoomLevel} onZoom={applyZoom} onFit={() => fitToView(true)} />
+      <ControlBar zoom={zoomLevel} onZoom={applyZoom} onFit={() => fitToView(true)} onToggleOspf={toggleOspf} ospfActive={ospfActive} />
     </div>
   )
 }
