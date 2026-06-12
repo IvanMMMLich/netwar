@@ -530,6 +530,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     setEditingEdge(null)
     runDijkstra()
     if (wgtSelRef.current) wgtSelRef.current.select('text').text((d: NetEdge) => String(edgeWeightsRef.current.get(d.id) ?? '?'))
+    window.dispatchEvent(new CustomEvent('netwar-ev', { detail: { type: 'weight-change' } }))
   }, [runDijkstra])
 
   // ── Build the static scene once ────────────────────────────────────────────
@@ -595,6 +596,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const reconv = 100 + Math.floor(Math.random() * 400)
           setLog(prev => [`⚠ LINK DOWN: ${sl}→${tl} | OSPF RECONVERGE: ${reconv}ms`, ...prev].slice(0, 3))
           runDijkstra(); styleEdgesRef.current()
+          window.dispatchEvent(new CustomEvent('netwar-ev', { detail: { type: 'link-break' } }))
         }, 500)
         lpTimers.set(d.id, tm)
       })
@@ -754,6 +756,29 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         return d.id === useStore.getState().selectedNodeId ? NODE_COLOR[d.type] : 'transparent'
       })
     }
+
+    // ── Scenario FX bridge: window events from the scenario player ──
+    const onFx = (e: Event) => {
+      const fx = (e as CustomEvent).detail
+      if (!fx) return
+      if (fx.type === 'bounce') bouncesRef.current.set(fx.node, { start: performance.now(), dur: 300, amp: 0.2 })
+      if (fx.type === 'packet') {
+        packetsRef.current.push({ id: nextIdRef.current++, kind: fx.kind, nodes: fx.route,
+          seg: 0, segElapsed: 0, bytes: 1460, ttl: 64 })
+        bouncesRef.current.set(fx.route[0], { start: performance.now(), dur: 200, amp: 0.2 })
+      }
+      if (fx.type === 'highlight') {
+        const set = new Set<string>(fx.nodes)
+        nodeSel.attr('opacity', (d: NetNode) => set.has(d.id) ? 1 : 0.25)
+        edgeSel.attr('opacity', (d: NetEdge) => set.has(d.source) && set.has(d.target) ? 1 : 0.15)
+      }
+      if (fx.type === 'clear') {
+        nodeSel.attr('opacity', 1); edgeSel.attr('opacity', 1)
+      }
+      if (fx.type === 'ospf-on')  useStore.getState().setOspfActive(true)
+      if (fx.type === 'ospf-off') useStore.getState().setOspfActive(false)
+    }
+    window.addEventListener('netwar-fx', onFx)
 
     // ── Zoom ──
     const zoom = d3.zoom<SVGSVGElement, unknown>()
@@ -958,7 +983,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     const ro = new ResizeObserver(() => fitToView(false))
     if (cref.current) ro.observe(cref.current)
 
-    return () => { cancelAnimationFrame(rafRef.current); ro.disconnect() }
+    return () => { cancelAnimationFrame(rafRef.current); ro.disconnect(); window.removeEventListener('netwar-fx', onFx) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
