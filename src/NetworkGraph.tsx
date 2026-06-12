@@ -43,6 +43,17 @@ function segDuration(a: string, b: string): number {
 
 function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3) }
 
+function routeLatencyMs(nodes: string[]): number {
+  let sum = 0
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const e = EDGE_BY_PAIR.get(pairKey(nodes[i], nodes[i + 1]))
+    if (e) sum += e.props.latency
+  }
+  return Math.max(1, Math.round(sum))
+}
+
+function nowTs(): string { return new Date().toTimeString().slice(0, 8) }
+
 // ─── OSPF: Dijkstra over EDGES ───────────────────────────────────────────────────
 
 const ALL_NODE_IDS = NODES.map(n => n.id)
@@ -84,9 +95,18 @@ function pathEdgeIds(path: string[]): Set<string> {
   return s
 }
 
-// ─── Counters HUD ───────────────────────────────────────────────────────────────
+// ─── Counters HUD + событийный мини-лог ──────────────────────────────────────
 
-function Counters({ c }: { c: { delivered: number; blocked: number; dns: number; vpn: number } }) {
+export interface HudEvent { ts: string; icon: '✓' | '✕' | '⚡' | '◎'; text: string }
+
+const HUD_ICON_COLOR: Record<HudEvent['icon'], string> = {
+  '✓': '#00e676', '✕': '#ff4444', '⚡': '#9c6bff', '◎': '#ffb300',
+}
+
+function Counters({ c, events }: {
+  c: { delivered: number; blocked: number; dns: number; vpn: number }
+  events: HudEvent[]
+}) {
   const Row = (label: string, val: number, color: string) => (
     <span style={{ color, textShadow: `0 0 8px ${color}`, letterSpacing: '0.12em' }}>
       {label}: {val}
@@ -100,6 +120,12 @@ function Counters({ c }: { c: { delivered: number; blocked: number; dns: number;
       {Row('BLOCKED BY ТСПУ',  c.blocked,   '#ff4444')}
       {Row('DNS RESOLVED',     c.dns,       '#ffb300')}
       {Row('VPN TUNNELED',     c.vpn,       '#9c6bff')}
+      {events.length > 0 && <div style={{ borderTop: '1px solid #1e2d4a', margin: '4px 0', width: 320 }} />}
+      {events.map((e, i) => (
+        <span key={i} style={{ fontSize: 10, color: HUD_ICON_COLOR[e.icon], opacity: 1 - i * 0.15 }}>
+          [{e.ts}] {e.icon} {e.text}
+        </span>
+      ))}
     </div>
   )
 }
@@ -471,6 +497,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const [pktTip, setPktTip]       = useState<{ x: number; y: number; pkt: Packet } | null>(null)
   const [statsState, setStatsState] = useState<Map<string, { passed: number; blocked: number }>>(new Map())
   const [log, setLog] = useState<string[]>([])
+  const [hudEvents, setHudEvents] = useState<HudEvent[]>([])
   const [ospfPath, setOspfPath]   = useState<{ nodes: string[]; cost: number } | null>(null)
   const [editingEdge, setEditingEdge] = useState<{ id: string; x: number; y: number; value: string } | null>(null)
 
@@ -827,9 +854,15 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         if (p.seg >= p.nodes.length - 1) {
           // final arrival
           const stat = nodeStatsRef.current.get(arrived)!
-          if (p.kind === 'http')   { cDel++; stat.passed++ }
-          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++ }
-          if (p.kind === 'dns')    { cDns++; stat.passed++ }
+          const srcLbl = NODE_MAP.get(p.nodes[0])?.label ?? p.nodes[0]
+          const dstSub = NODE_MAP.get(arrived)?.sublabel ?? arrived
+          const lat = routeLatencyMs(p.nodes)
+          if (p.kind === 'http')   { cDel++; stat.passed++
+            setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 5)) }
+          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++
+            setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 5)) }
+          if (p.kind === 'dns')    { cDns++; stat.passed++
+            setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 5)) }
           if (p.kind === 'blocked') {
             // reached ТСПУ → shatter
             cBlk++; stat.blocked++
@@ -839,6 +872,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             setLog(prev => [`✕ BLOCKED: ${uType}→blocked.com | SNI detected`, ...prev].slice(0, 3))
             counterRef.current.blocked++
             onTspuBlocked(counterRef.current.blocked)
+            setHudEvents(prev => [{ ts: nowTs(), icon: '✕' as const, text: `${srcLbl} → blocked.com | BLOCKED ТСПУ` }, ...prev].slice(0, 5))
           }
           continue // remove
         }
@@ -1028,7 +1062,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       {ospfActive && ospfPath && <OspfBanner path={ospfPath.nodes} cost={ospfPath.cost} />}
       {editingEdge && <WeightEditor edge={editingEdge} onCommit={commitWeight} onCancel={() => setEditingEdge(null)} />}
       <EventLog entries={log} />
-      <Counters c={counters} />
+      <Counters c={counters} events={hudEvents} />
       <ControlBar zoom={zoomLevel} onZoom={applyZoom} onFit={() => fitToView(true)} onToggleOspf={toggleOspf} ospfActive={ospfActive} />
     </div>
   )
