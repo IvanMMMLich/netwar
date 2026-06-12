@@ -133,12 +133,12 @@ function Tooltip({ tip, containerRef }: { tip: TooltipState; containerRef: React
   const color = NODE_COLOR[tip.node.type]
   const rows = NODE_INFO[tip.node.type]
   const PAD = 16
-  const cardW = 320
+  const cardW = 480
 
   const rect = containerRef.current?.getBoundingClientRect()
   const cw = rect?.width ?? window.innerWidth
   const ch = rect?.height ?? window.innerHeight
-  const cardH = 28 + rows.length * 20
+  const cardH = 36 + rows.length * 28
 
   let left = tip.x + PAD
   let top  = tip.y + PAD
@@ -150,19 +150,19 @@ function Tooltip({ tip, containerRef }: { tip: TooltipState; containerRef: React
       position: 'absolute', left, top,
       background: '#0d1424',
       border: `1.5px solid ${color}`,
-      boxShadow: `0 0 16px ${color}44`,
-      padding: '10px 14px',
+      boxShadow: `0 0 20px ${color}44`,
+      padding: '14px 18px',
       pointerEvents: 'none',
       zIndex: 100,
       width: cardW,
     }}>
       <div style={{
         fontFamily: '"Press Start 2P", cursive',
-        fontSize: 9,
+        fontSize: 13,
         color,
-        marginBottom: 10,
+        marginBottom: 14,
         letterSpacing: '0.08em',
-        textShadow: `0 0 8px ${color}`,
+        textShadow: `0 0 10px ${color}`,
       }}>
         [{NODE_LABEL[tip.node.type]}]&nbsp;&nbsp;{tip.node.type}
       </div>
@@ -174,12 +174,12 @@ function Tooltip({ tip, containerRef }: { tip: TooltipState; containerRef: React
         return (
           <div key={i} style={{
             display: 'flex',
-            gap: 6,
+            gap: 8,
             fontFamily: '"Share Tech Mono", monospace',
-            fontSize: 10,
-            lineHeight: '1.8',
+            fontSize: 13,
+            lineHeight: '2',
           }}>
-            <span style={{ color: keyColor, minWidth: 110, flexShrink: 0 }}>{row.key}:</span>
+            <span style={{ color: keyColor, minWidth: 160, flexShrink: 0 }}>{row.key}:</span>
             <span style={{ color: valColor }}>{row.value}</span>
           </div>
         )
@@ -188,64 +188,72 @@ function Tooltip({ tip, containerRef }: { tip: TooltipState; containerRef: React
   )
 }
 
-function ZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: number) => void }) {
-  const btnStyle = (disabled: boolean): React.CSSProperties => ({
-    fontFamily: '"Press Start 2P", cursive',
-    fontSize: 12,
-    background: '#0d1424',
-    border: '1.5px solid #1e2d4a',
-    color: disabled ? '#2a3a4a' : '#c8d8f0',
-    width: 32,
-    height: 32,
-    cursor: disabled ? 'default' : 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'border-color 0.15s, color 0.15s',
-    userSelect: 'none',
-  })
+function ZoomBtn({
+  label, disabled, onClick,
+}: { label: string; disabled: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = React.useState(false)
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        fontFamily: '"Press Start 2P", cursive',
+        fontSize: 16,
+        background: '#0d1424',
+        border: `1.5px solid ${!disabled && hovered ? '#00e676' : '#1e2d4a'}`,
+        boxShadow: !disabled && hovered ? '0 0 10px #00e67644' : 'none',
+        color: disabled ? '#2a3a4a' : hovered ? '#00e676' : '#c8d8f0',
+        width: 48,
+        height: 48,
+        cursor: disabled ? 'default' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'border-color 0.15s, color 0.15s, box-shadow 0.15s',
+        userSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      {label}
+    </button>
+  )
+}
 
+function ZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: number) => void }) {
   return (
     <div style={{
       position: 'absolute',
-      bottom: 24,
-      right: 24,
+      right: 16,
+      top: '50%',
+      transform: 'translateY(-50%)',
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
-      gap: 4,
+      gap: 8,
       zIndex: 50,
     }}>
-      <button
-        style={btnStyle(zoom <= ZOOM_MIN)}
-        disabled={zoom <= ZOOM_MIN}
-        onMouseEnter={e => { if (zoom > ZOOM_MIN) (e.currentTarget as HTMLElement).style.borderColor = '#00e676' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#1e2d4a' }}
-        onClick={() => onZoom(-ZOOM_STEP)}
-      >−</button>
+      <ZoomBtn label="+" disabled={zoom >= ZOOM_MAX} onClick={() => onZoom(ZOOM_STEP)} />
 
       <div style={{
-        fontFamily: '"Share Tech Mono", monospace',
-        fontSize: 11,
+        fontFamily: '"Press Start 2P", cursive',
+        fontSize: 14,
         color: '#7a9ab8',
         background: '#0d1424',
         border: '1.5px solid #1e2d4a',
-        height: 32,
-        padding: '0 8px',
+        width: 48,
+        height: 48,
         display: 'flex',
         alignItems: 'center',
-        minWidth: 48,
         justifyContent: 'center',
+        userSelect: 'none',
+        letterSpacing: '-0.02em',
       }}>
-        {zoom.toFixed(1)}x
+        {zoom.toFixed(1)}
       </div>
 
-      <button
-        style={btnStyle(zoom >= ZOOM_MAX)}
-        disabled={zoom >= ZOOM_MAX}
-        onMouseEnter={e => { if (zoom < ZOOM_MAX) (e.currentTarget as HTMLElement).style.borderColor = '#00e676' }}
-        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#1e2d4a' }}
-        onClick={() => onZoom(ZOOM_STEP)}
-      >+</button>
+      <ZoomBtn label="−" disabled={zoom <= ZOOM_MIN} onClick={() => onZoom(-ZOOM_STEP)} />
     </div>
   )
 }
