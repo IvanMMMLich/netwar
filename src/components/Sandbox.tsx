@@ -1,9 +1,12 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
+import Tutorial from './Tutorial'
 import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
   sbEdgeParams, sbBwWidth, sbBwLabel, SB_UPKEEP, edgeUpkeep, TOOL_INFO,
 } from '../data/sandbox'
+
+const fireAction = (action: string) => window.dispatchEvent(new CustomEvent('netwar-action', { detail: { action } }))
 import {
   buildAdj, bfsToType, findPath, validateTopology, getConnectionHint,
   isTspuOnPath, isVpnBypassingTspu, ValidationResult,
@@ -135,6 +138,7 @@ export default function Sandbox() {
   const gitMerge = useStore(s => s.gitMerge)
   const [termInput, setTermInput] = useState('')
   const [termOut, setTermOut] = useState<string[]>(['NetWars shell — введи "help" для списка команд'])
+  const [tutorialOpen, setTutorialOpen] = useState(() => localStorage.getItem('netwar_tutorial') !== 'done')
   const [mergeFlash, setMergeFlash] = useState(false)
   const onMain = repository.currentBranch === 'main'
 
@@ -219,7 +223,7 @@ export default function Sandbox() {
       const item = SB_BY_TYPE.get(d.type)!
       if (!spend(item.bits, item.ips)) { setFlash(true); setTimeout(() => setFlash(false), 350); pushLog(`⚠ Недостаточно средств для ${item.full}`); return }
       setNodes(prev => [...prev, { id: newId(d.type), type: d.type, x, y, pinned: false, born: performance.now() }])
-      pushLog(`✓ ${item.full} создан (-${item.bits}⬡${item.ips ? ` -${item.ips}◈` : ''})`)
+      pushLog(`✓ ${item.full} создан (-${item.bits}⬡${item.ips ? ` -${item.ips}◈` : ''})`); fireAction('addNode')
     }
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
@@ -282,6 +286,7 @@ export default function Sandbox() {
         setEdges(prev => [...prev, { id: newId('e'), source: a.id, target: b.id, ...pr, born: performance.now() }])
         if (hint.level === 'warn') pushLog(`⚠ Ребро создано: ${hint.message}`)
         else pushLog(`✓ Ребро ${SB_BY_TYPE.get(a.type)!.full} → ${SB_BY_TYPE.get(b.type)!.full}`)
+        fireAction('addEdge')
         const plaque = edgePlaque(a.type, b.type)
         if (plaque) setEdgePlaque({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, text: plaque, until: Date.now() + 2000 })
       }
@@ -374,7 +379,7 @@ export default function Sandbox() {
     const users = nodes.filter(n => n.type === 'User')
     const anyPath = users.some(u => bfsToType(nodes, edges, u.id, 'WebServer'))
     if (!anyPath) { pushLog('⚠ ОШИБКА: нет маршрута от User до WebServer'); return }
-    runRef.current = true; setRunning(true); wgStart.current = performance.now(); logThrottle.current.clear(); pushLog('▶ Симуляция запущена')
+    runRef.current = true; setRunning(true); wgStart.current = performance.now(); logThrottle.current.clear(); pushLog('▶ Симуляция запущена'); fireAction('run')
   }, [nodes, edges, pushLog])
 
   const stopRun = useCallback(() => {
@@ -747,7 +752,7 @@ export default function Sandbox() {
       </div>
 
       {/* mission intro */}
-      {mission != null && missionIntro && (
+      {mission != null && missionIntro && !tutorialOpen && (
         <Modal onClose={skipTutorial}>
           <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color: '#9c6bff', marginBottom: 12 }}>
             📋 ЗАДАНИЕ {mission}
@@ -820,11 +825,14 @@ export default function Sandbox() {
         <SBtn label={running ? '⏸ ПАУЗА' : '▶ RUN'} color="#00e676" onClick={() => running ? stopRun() : startRun()} />
         <SBtn label="⏹ STOP" color="#ff8c00" onClick={stopRun} />
         <SBtn label="🗑 CLEAR" color="#ff4444" onClick={() => setConfirmClear(true)} />
-        <SBtn label="✓ CHECK" color="#00b4ff" onClick={() => setCheck(validateTopology(nodes, edges))} />
+        <SBtn label="✓ CHECK" color="#00b4ff" onClick={() => { setCheck(validateTopology(nodes, edges)); fireAction('check') }} />
         <SBtn label="💾 SAVE" color="#9c6bff" onClick={() => doSave(1)} />
         <SBtn label="📂 LOAD" color="#ffb300" onClick={() => setLoadOpen(true)} />
         <SBtn label="⬡ SHOP" color="#ffb300" onClick={() => setShopOpen(true)} />
+        <SBtn label="? ТУТОР" color="#00b4ff" onClick={() => setTutorialOpen(true)} />
       </div>
+
+      <Tutorial open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
 
       {/* active effect timers */}
       {effects.length > 0 && (
