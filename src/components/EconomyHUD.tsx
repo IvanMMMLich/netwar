@@ -49,21 +49,26 @@ export default function EconomyHUD() {
         position: 'absolute', top: 38, right: panelOpen ? 316 : 16, zIndex: 60,
         fontFamily: '"Share Tech Mono", monospace', fontSize: 12,
         display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4,
-        pointerEvents: 'none', transition: 'right .25s ease',
+        pointerEvents: 'auto', transition: 'right .25s ease', cursor: 'help',
         animation: lowBalance && !isTopology ? 'sbflash .8s infinite' : 'none',
         padding: lowBalance && !isTopology ? '2px 6px' : 0,
       }}>
         {isTopology ? (
-          <span style={{ color: '#00e676', textShadow: '0 0 6px #00e67666' }}>ОЧКИ: {score.toLocaleString()}</span>
+          <span title="Очки за доставку пакетов в обучающем режиме. Не тратятся — это счёт, а не валюта."
+            style={{ color: '#00e676', textShadow: '0 0 6px #00e67666' }}>ОЧКИ: {score.toLocaleString()}</span>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 16 }}>
-              <span style={{ color: lowBalance ? '#ff4444' : '#ffb300', textShadow: '0 0 6px #ffb30066' }}>БИТЫ: {Math.round(bits).toLocaleString()} ⬡</span>
-              <span style={{ color: '#9c6bff', textShadow: '0 0 6px #9c6bff66' }}>ЧИП-IP: {cleanIPs} ◈</span>
-              <span style={{ color: '#00b4ff', textShadow: '0 0 6px #00b4ff66' }}>AS LEVEL: {asLevel}</span>
+              <span title="Основная валюта. Зарабатываешь за доставку пакетов. Тратишь на строительство и содержание узлов. При нуле — инфраструктура отключается."
+                style={{ color: lowBalance ? '#ff4444' : '#ffb300', textShadow: '0 0 6px #ffb30066' }}>БИТЫ: {Math.round(bits).toLocaleString()} ⬡</span>
+              <span title="Чистые IP не в чёрном списке ТСПУ. Нужны для VPN серверов. Добываются за сценарии или 2000 битов."
+                style={{ color: '#9c6bff', textShadow: '0 0 6px #9c6bff66' }}>ЧИП-IP: {cleanIPs} ◈</span>
+              <span title="Уровень AS. L1: до 10 узлов. L2 (5000⬡): +VPN/Firewall. L3 (20000⬡): +CDN."
+                style={{ color: '#00b4ff', textShadow: '0 0 6px #00b4ff66' }}>AS LEVEL: {asLevel}</span>
             </div>
             <div style={{ display: 'flex', gap: 14, fontSize: 11 }}>
-              <span style={{ color: '#ff4444' }}>РАСХОД: -{upkeepRate.toFixed(1)} ⬡/с</span>
+              <span title="Стоимость содержания всех узлов и каналов. Чем больше инфраструктура — тем дороже. Оптимизируй маршруты."
+                style={{ color: '#ff4444' }}>РАСХОД: -{upkeepRate.toFixed(1)} ⬡/с</span>
               <span style={{ color: '#00e676' }}>ДОХОД: +{incomeRate.toFixed(1)} ⬡/с</span>
               <span style={{ color: balance >= 0 ? '#00e676' : '#ff4444' }}>БАЛАНС: {balance >= 0 ? '+' : ''}{balance.toFixed(1)} ⬡/с</span>
             </div>

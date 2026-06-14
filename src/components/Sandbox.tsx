@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
-  sbEdgeParams, sbBwWidth, sbBwLabel, SB_UPKEEP, edgeUpkeep,
+  sbEdgeParams, sbBwWidth, sbBwLabel, SB_UPKEEP, edgeUpkeep, TOOL_INFO,
 } from '../data/sandbox'
 import {
   buildAdj, bfsToType, findPath, validateTopology, getConnectionHint,
@@ -24,6 +24,17 @@ export interface UserCfg {
   dest: 'ws-google' | 'ws-news' | 'ws-blocked'
 }
 const DEFAULT_CFG: UserCfg = { transport: 'UDP', application: 'HTTPS', vpn: 'VLESS', dest: 'ws-google' }
+
+// short plaque text shown above a freshly-created edge (block 4, point 4)
+function edgePlaque(a: SbType, b: SbType): string {
+  const has = (x: SbType, y: SbType) => (a === x && b === y) || (a === y && b === x)
+  if (has('Router', 'ТСПУ')) return 'Трафик через DPI — ТСПУ всё видит'
+  if (has('Router', 'VPN'))  return 'Туннель — ТСПУ видит только IP VPN'
+  if (has('User', 'Switch'))  return 'LAN — домашняя сеть'
+  if (has('ТСПУ', 'Firewall')) return 'Через фильтрацию DPI'
+  if (has('VPN', 'Firewall'))  return 'Обход ТСПУ — зашифровано'
+  return ''
+}
 
 // packet colour by protocol/vpn (block 5)
 function pktColor(cfg: UserCfg): string {
@@ -48,15 +59,17 @@ function ToolItem({ item, affordable, onStart }: {
   item: SbCatalogItem; affordable: boolean; onStart: (e: React.MouseEvent) => void
 }) {
   const [hov, setHov] = useState(false)
+  const [cardTop, setCardTop] = useState(0)
   const grey = !affordable && !item.enemy
   const c = item.color
+  const info = TOOL_INFO[item.type]
   const priceStr = item.enemy ? 'ВРАГ'
     : item.bits === 0 ? 'free'
     : `${item.bits}⬡${item.ips ? ` +${item.ips}◈` : ''}`
   return (
     <div
       onMouseDown={item.enemy || grey ? undefined : onStart}
-      onMouseEnter={() => setHov(true)}
+      onMouseEnter={e => { setHov(true); setCardTop(e.currentTarget.getBoundingClientRect().top) }}
       onMouseLeave={() => setHov(false)}
       style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
         cursor: item.enemy || grey ? 'not-allowed' : 'grab', userSelect: 'none', opacity: grey ? 0.4 : 1 }}
@@ -71,6 +84,24 @@ function ToolItem({ item, affordable, onStart }: {
         color: item.enemy ? '#ff4444' : grey ? '#ff8c00' : '#ffb300' }}>
         {hov && grey ? `⚠ нужно ${item.bits}⬡` : priceStr}
       </span>
+      {/* educational hover card to the right of the toolbar */}
+      {hov && (
+        <div style={{ position: 'fixed', left: 88, top: Math.min(cardTop, window.innerHeight - 170), zIndex: 1200,
+          width: 280, background: '#0d1424', border: `1.5px solid ${c}`, boxShadow: `0 0 14px ${c}44`,
+          padding: '10px 14px', pointerEvents: 'none', fontFamily: '"Share Tech Mono", monospace' }}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 9, color: c, marginBottom: 8 }}>
+            [{item.label}] {item.full.toUpperCase()}
+          </div>
+          {[['Уровень', info.level], ['Функция', info.func], ['Стоимость', item.enemy ? '— враг' : priceStr],
+            ['Содержание', `-${SB_UPKEEP[item.type]} ⬡/сек`], ['Протоколы', info.protocols]].map(([k, v]) => (
+            <div key={k} style={{ display: 'flex', gap: 6, fontSize: 10, lineHeight: '1.7' }}>
+              <span style={{ color: '#4a6a8a', minWidth: 78, flexShrink: 0 }}>{k}:</span>
+              <span style={{ color: '#c8d8f0' }}>{v}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 9, color: '#ffb300', marginTop: 6, lineHeight: 1.4 }}>{info.note}</div>
+        </div>
+      )}
     </div>
   )
 }
@@ -103,6 +134,7 @@ export default function Sandbox() {
   const [hoverNode, setHoverNode] = useState<string | null>(null) // node under cursor (for hint badge)
   const [hoverEdge, setHoverEdge] = useState<string | null>(null) // edge under cursor (violation highlight)
   const [toast, setToast] = useState<{ msg: string; until: number } | null>(null)
+  const [edgePlaqueState, setEdgePlaque] = useState<{ x: number; y: number; text: string; until: number } | null>(null)
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const [editEdge, setEditEdge] = useState<string | null>(null)
   const [flash, setFlash] = useState(false)
@@ -238,6 +270,8 @@ export default function Sandbox() {
         setEdges(prev => [...prev, { id: newId('e'), source: a.id, target: b.id, ...pr, born: performance.now() }])
         if (hint.level === 'warn') pushLog(`⚠ Ребро создано: ${hint.message}`)
         else pushLog(`✓ Ребро ${SB_BY_TYPE.get(a.type)!.full} → ${SB_BY_TYPE.get(b.type)!.full}`)
+        const plaque = edgePlaque(a.type, b.type)
+        if (plaque) setEdgePlaque({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, text: plaque, until: Date.now() + 2000 })
       }
       return null
     })
@@ -245,6 +279,8 @@ export default function Sandbox() {
 
   // auto-clear error toast
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t) }, [toast])
+  // auto-clear edge plaque
+  useEffect(() => { if (!edgePlaqueState) return; const t = setTimeout(() => setEdgePlaque(null), 2000); return () => clearTimeout(t) }, [edgePlaqueState])
 
   // Escape deselect
   useEffect(() => {
@@ -592,6 +628,15 @@ export default function Sandbox() {
             fontFamily: '"Share Tech Mono", monospace', color: '#2a3a4a', fontSize: 13,
             letterSpacing: '0.2em', pointerEvents: 'none', textAlign: 'center' }}>
             SANDBOX — перетащи узлы из панели слева, кликами соединяй
+          </div>
+        )}
+
+        {/* edge-creation plaque (2s) */}
+        {edgePlaqueState && Date.now() < edgePlaqueState.until && (
+          <div style={{ position: 'absolute', left: edgePlaqueState.x, top: edgePlaqueState.y - 22, transform: 'translate(-50%,-50%)',
+            fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: '#00b4ff', pointerEvents: 'none', zIndex: 18,
+            background: '#0d1424', border: '1px solid #00b4ff55', padding: '2px 8px', whiteSpace: 'nowrap' }}>
+            {edgePlaqueState.text}
           </div>
         )}
 
