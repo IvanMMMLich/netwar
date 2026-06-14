@@ -125,9 +125,9 @@ export default function EventSystem() {
         </div>
       )}
 
-      {/* event log */}
+      {/* event log (top-left, below SYS label, away from the HUD log) */}
       {log.length > 0 && mode === 'topology' && (
-        <div style={{ position: 'absolute', bottom: 150, left: 16, zIndex: 55,
+        <div style={{ position: 'absolute', top: 96, left: 16, zIndex: 55,
           fontFamily: '"Share Tech Mono", monospace', fontSize: 10, display: 'flex', flexDirection: 'column', gap: 2, pointerEvents: 'none' }}>
           {log.map((l, i) => <span key={i} style={{ color: l.startsWith('⚠') ? '#ff8c00' : l.startsWith('💡') ? '#00b4ff' : '#00e676', opacity: 1 - i * 0.2 }}>{l}</span>)}
         </div>
