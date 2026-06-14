@@ -32,8 +32,10 @@ export default function App() {
         <NetworkGraph onNodeStats={handleNodeStats} onTspuBlocked={handleTspu} />
       </div>
 
-      {/* SANDBOX */}
-      {!isTopology && <Sandbox />}
+      {/* SANDBOX — kept mounted so the canvas persists across switches */}
+      <div style={{ display: isTopology ? 'none' : 'block' }}>
+        <Sandbox />
+      </div>
 
       <ModeSwitcher />
 

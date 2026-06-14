@@ -41,3 +41,21 @@
 .scanlines {
   animation: flicker 5s infinite;
 }
+
+/* Sandbox node spawn / despawn */
+@keyframes sbpop {
+  from { transform: translate(-50%, -50%) scale(0); }
+  to   { transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes sbfade {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+}
+@keyframes sbflash {
+  0%, 100% { background: #0d1424; }
+  50%      { background: #ff444433; }
+}
+@keyframes incomeFloat {
+  from { opacity: 1; transform: translate(-50%, 0); }
+  to   { opacity: 0; transform: translate(-50%, -32px); }
+}

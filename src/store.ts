@@ -9,6 +9,11 @@ export interface Protocols {
 
 interface NetWarStore {
   mode:                'topology' | 'sandbox'
+  // economy (expanded in block 6)
+  bits:                number
+  cleanIPs:            number
+  asLevel:             number
+  totalIncome:         number
   paused:              boolean
   speed:               number
   speedIdx:            number
@@ -22,6 +27,10 @@ interface NetWarStore {
   ospfDstId:           string | null
 
   setMode:               (m: 'topology' | 'sandbox') => void
+  spend:                 (bits: number, ips?: number) => boolean
+  earn:                  (bits: number) => void
+  addCleanIPs:           (n: number) => void
+  setAsLevel:            (n: number) => void
   setPaused:             (v: boolean) => void
   cycleSpeed:            () => void
   setOspfActive:         (v: boolean) => void
@@ -40,6 +49,10 @@ const SPEEDS = [0.5, 1, 1.5, 2]
 
 export const useStore = create<NetWarStore>((set, get) => ({
   mode:               'topology',
+  bits:               1000,
+  cleanIPs:           5,
+  asLevel:            1,
+  totalIncome:        0,
   paused:             false,
   speed:              1,
   speedIdx:           1,
@@ -53,6 +66,15 @@ export const useStore = create<NetWarStore>((set, get) => ({
   ospfDstId:  null,
 
   setMode:     m  => set({ mode: m }),
+  spend: (bits, ips = 0) => {
+    const s = get()
+    if (s.bits < bits || s.cleanIPs < ips) return false
+    set({ bits: s.bits - bits, cleanIPs: s.cleanIPs - ips })
+    return true
+  },
+  earn: (bits) => set(s => ({ bits: s.bits + bits, totalIncome: s.totalIncome + bits })),
+  addCleanIPs: (n) => set(s => ({ cleanIPs: s.cleanIPs + n })),
+  setAsLevel: (n) => set({ asLevel: n }),
   setPaused:   v  => set({ paused: v }),
   cycleSpeed:  ()  => set(s => {
     const idx = (s.speedIdx + 1) % SPEEDS.length
