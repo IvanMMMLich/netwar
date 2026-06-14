@@ -13,6 +13,67 @@ export interface SbEdge { id: string; source: string; target: string; bw: number
 let sbId = 0
 const newId = (p: string) => `${p}-${sbId++}`
 
+export interface SbPacket { id: number; path: string[]; seg: number; elapsed: number; blocked: boolean }
+let sbPktId = 0
+
+// adjacency (undirected) from edges
+function buildAdj(nodes: SbNode[], edges: SbEdge[]): Map<string, string[]> {
+  const adj = new Map<string, string[]>(nodes.map(n => [n.id, []]))
+  for (const e of edges) { adj.get(e.source)?.push(e.target); adj.get(e.target)?.push(e.source) }
+  return adj
+}
+
+// BFS shortest path (by hops) from src to first node satisfying pred
+function bfsTo(adj: Map<string, string[]>, src: string, pred: (id: string) => boolean): string[] | null {
+  const prev = new Map<string, string>(); const seen = new Set([src]); const q = [src]
+  while (q.length) {
+    const u = q.shift()!
+    if (u !== src && pred(u)) { const path = [u]; let c = u; while (prev.has(c)) { c = prev.get(c)!; path.unshift(c) } return path }
+    for (const v of adj.get(u) ?? []) if (!seen.has(v)) { seen.add(v); prev.set(v, u); q.push(v) }
+  }
+  return null
+}
+
+export interface CheckResult { ok: boolean; lines: { icon: string; text: string; color: string }[]; advice: string }
+
+function validateTopology(nodes: SbNode[], edges: SbEdge[]): CheckResult {
+  const adj = buildAdj(nodes, edges)
+  const users = nodes.filter(n => n.type === 'User')
+  const servers = nodes.filter(n => n.type === 'WebServer')
+  const dns = nodes.filter(n => n.type === 'DNS')
+  const tspu = nodes.filter(n => n.type === 'ТСПУ')
+  const vpn = nodes.filter(n => n.type === 'VPN')
+  const L: CheckResult['lines'] = []
+  const G = '#00e676', R = '#ff4444', A = '#ff8c00'
+  let ok = true
+  L.push(users.length ? { icon: '✓', text: `User найден (${users.length} шт.)`, color: G } : (ok = false, { icon: '✗', text: 'Нет ни одного User!', color: R }))
+  L.push(servers.length ? { icon: '✓', text: `WebServer найден (${servers.length} шт.)`, color: G } : (ok = false, { icon: '✗', text: 'Нет WebServer!', color: R }))
+  // path
+  let pathFound = false; let pathViaTspu = false
+  for (const u of users) { const path = bfsTo(adj, u.id, id => nodes.find(n => n.id === id)?.type === 'WebServer'); if (path) { pathFound = true; if (path.some(id => nodes.find(n => n.id === id)?.type === 'ТСПУ')) pathViaTspu = true } }
+  L.push(pathFound ? { icon: '✓', text: 'Путь до WebServer существует', color: G } : (ok = false, { icon: '✗', text: 'Нет пути User → WebServer', color: R }))
+  // isolated
+  const connected = new Set<string>(); if (nodes.length) { const st = [nodes[0].id]; connected.add(nodes[0].id); while (st.length) { const u = st.pop()!; for (const v of adj.get(u) ?? []) if (!connected.has(v)) { connected.add(v); st.push(v) } } }
+  const isolated = nodes.filter(n => !connected.has(n.id))
+  L.push(isolated.length === 0 ? { icon: '✓', text: 'Изолированных узлов нет', color: G } : { icon: '⚠', text: `Изолированных узлов: ${isolated.length}`, color: A })
+  if (pathViaTspu) {
+    const bypass = vpn.length > 0
+    L.push({ icon: '⚠', text: 'ТСПУ на пути блокирует трафик', color: A })
+    L.push(bypass ? { icon: '✓', text: 'VPN обходит ТСПУ', color: G } : { icon: '✗', text: 'VPN не настроен для обхода ТСПУ', color: R })
+  }
+  if (dns.length === 0) L.push({ icon: '✗', text: 'DNS сервер не настроен!', color: R })
+  const advice = !servers.length ? 'Добавь WebServer как цель трафика'
+    : !pathFound ? 'Соедини User с WebServer через Switch/Router'
+    : isolated.length ? 'Подключи изолированные узлы рёбрами'
+    : pathViaTspu && !vpn.length ? 'Добавь VPN параллельно ТСПУ для обхода'
+    : dns.length === 0 ? 'Добавь DNS сервер между User и Router'
+    : 'Топология готова — нажми RUN'
+  return { ok, lines: L, advice }
+}
+
+interface SaveSlot { name: string; ts: number; nodes: SbNode[]; edges: SbEdge[]; bits: number }
+const SLOT_KEY = (n: number) => `netwar_sandbox_save_${n}`
+
 // ─── Toolbar item ─────────────────────────────────────────────────────────────
 
 function ToolItem({ item, affordable, onStart }: {
@@ -65,6 +126,20 @@ export default function Sandbox() {
   const [editEdge, setEditEdge] = useState<string | null>(null)
   const [flash, setFlash] = useState(false)
   const [log, setLog] = useState<string[]>([])
+  const [running, setRunning] = useState(false)
+  const [tick, setTick] = useState(0)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [check, setCheck] = useState<CheckResult | null>(null)
+  const [loadOpen, setLoadOpen] = useState(false)
+  const [exploding, setExploding] = useState(false)
+
+  const pktRef = useRef<SbPacket[]>([])
+  const runRef = useRef(false)
+  const rafRef = useRef(0)
+  const lastSpawn = useRef(0)
+  const lastFrame = useRef(0)
+  const nodesRef = useRef<SbNode[]>([])
+  const edgesRef = useRef<SbEdge[]>([])
 
   const canvasRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -180,7 +255,78 @@ export default function Sandbox() {
   }, [])
   const deleteEdge = useCallback((id: string) => { setEdges(prev => prev.filter(e => e.id !== id)); setCtx(null); setEditEdge(null) }, [])
 
+  // keep refs in sync for the sim loop
+  useEffect(() => { nodesRef.current = nodes }, [nodes])
+  useEffect(() => { edgesRef.current = edges }, [edges])
+
+  // ── RUN / STOP ──
+  const startRun = useCallback(() => {
+    const adj = buildAdj(nodes, edges)
+    const users = nodes.filter(n => n.type === 'User')
+    const anyPath = users.some(u => bfsTo(adj, u.id, id => nodes.find(n => n.id === id)?.type === 'WebServer'))
+    if (!anyPath) { pushLog('⚠ ОШИБКА: нет маршрута от User до WebServer'); return }
+    runRef.current = true; setRunning(true); pushLog('▶ Симуляция запущена')
+  }, [nodes, edges, pushLog])
+
+  const stopRun = useCallback(() => {
+    runRef.current = false; setRunning(false); pktRef.current = []; setTick(t => t + 1); pushLog('⏹ Симуляция остановлена')
+  }, [pushLog])
+
+  useEffect(() => {
+    const loop = (now: number) => {
+      const dt = lastFrame.current ? now - lastFrame.current : 16; lastFrame.current = now
+      if (runRef.current) {
+        const ns = nodesRef.current, es = edgesRef.current
+        const adj = buildAdj(ns, es)
+        const users = ns.filter(n => n.type === 'User')
+        const hasVpn = ns.some(n => n.type === 'VPN')
+        if (now - lastSpawn.current > 700 && pktRef.current.length < 20 && users.length) {
+          const u = users[Math.floor(Math.random() * users.length)]
+          const target = Math.random() < 0.7 ? 'WebServer' : 'DNS'
+          const path = bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === target)
+            ?? bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === 'WebServer')
+          if (path && path.length > 1) pktRef.current.push({ id: sbPktId++, path, seg: 0, elapsed: 0, blocked: false })
+          lastSpawn.current = now
+        }
+        const survivors: SbPacket[] = []
+        for (const pk of pktRef.current) {
+          const a = pk.path[pk.seg], b = pk.path[pk.seg + 1]
+          if (!b) continue
+          // block at ТСПУ if no VPN on path
+          const nb = ns.find(n => n.id === b)
+          if (nb?.type === 'ТСПУ' && !hasVpn) { continue }   // dropped
+          pk.elapsed += dt
+          if (pk.elapsed >= 600) { pk.seg++; pk.elapsed = 0; if (pk.seg >= pk.path.length - 1) continue }
+          survivors.push(pk)
+        }
+        pktRef.current = survivors
+        setTick(t => (t + 1) % 1000000)
+      }
+      rafRef.current = requestAnimationFrame(loop)
+    }
+    rafRef.current = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  const doClear = useCallback(() => {
+    setExploding(true)
+    setTimeout(() => { setNodes([]); setEdges([]); pktRef.current = []; runRef.current = false; setRunning(false); setExploding(false); pushLog('🗑 Холст очищен') }, 500)
+    setConfirmClear(false)
+  }, [pushLog])
+
+  const doSave = useCallback((slot: number) => {
+    const data: SaveSlot = { name: `${nodes.length} узлов`, ts: Date.now(), nodes, edges, bits }
+    localStorage.setItem(SLOT_KEY(slot), JSON.stringify(data)); pushLog(`💾 Сохранено в слот ${slot}`)
+  }, [nodes, edges, bits, pushLog])
+
+  const doLoad = useCallback((slot: number) => {
+    const raw = localStorage.getItem(SLOT_KEY(slot)); if (!raw) return
+    try { const d: SaveSlot = JSON.parse(raw); setNodes(d.nodes); setEdges(d.edges); pushLog(`📂 Загружено из слота ${slot}`) } catch { pushLog('⚠ Ошибка загрузки') }
+    setLoadOpen(false)
+  }, [pushLog])
+
   const selNode = selected ? nodeById(selected) : null
+  void tick // re-render trigger
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#070b14' }}
@@ -231,6 +377,15 @@ export default function Sandbox() {
             <line x1={selNode.x} y1={selNode.y} x2={mouse.x} y2={mouse.y}
               stroke="#00e676" strokeWidth={1.5} strokeDasharray="5 4" opacity={0.7} />
           )}
+
+          {/* running packets */}
+          {running && pktRef.current.map(pk => {
+            const a = nodeById(pk.path[pk.seg]), b = nodeById(pk.path[pk.seg + 1]); if (!a || !b) return null
+            const t = Math.min(pk.elapsed / 600, 1)
+            const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t
+            return <rect key={pk.id} x={x - 3} y={y - 3} width={6} height={6} fill="#00b4ff"
+              style={{ filter: 'drop-shadow(0 0 4px #00b4ff)' }} />
+          })}
         </svg>
 
         {nodes.length === 0 && (
@@ -250,7 +405,7 @@ export default function Sandbox() {
               onMouseDown={onNodeMouseDown(n.id)}
               onContextMenu={ev => { ev.preventDefault(); ev.stopPropagation(); setCtx({ kind: 'node', id: n.id, x: ev.clientX, y: ev.clientY }) }}
               style={{ position: 'absolute', left: n.x, top: n.y, width: SB_NODE_SIZE, height: SB_NODE_SIZE,
-                transform: 'translate(-50%,-50%)', animation: performance.now() - n.born < 250 ? 'sbpop .2s ease-out' : 'none',
+                transform: 'translate(-50%,-50%)', animation: exploding ? 'sbfade .5s ease-in forwards' : (performance.now() - n.born < 250 ? 'sbpop .2s ease-out' : 'none'),
                 border: `2px solid ${isSel ? '#00e676' : item.color}`, borderRadius: 3, background: `${item.color}1a`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: n.pinned ? 'default' : 'grab',
                 fontFamily: '"Press Start 2P", cursive', fontSize: item.label.length > 2 ? 8 : 14, color: item.color,
@@ -274,6 +429,68 @@ export default function Sandbox() {
           </div>
         )}
       </div>
+
+      {/* bottom control panel */}
+      <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+        zIndex: 40, display: 'flex', gap: 6, background: '#070b14', border: '1px solid #1e2d4a', padding: '4px 10px' }}>
+        <SBtn label={running ? '⏸ ПАУЗА' : '▶ RUN'} color="#00e676" onClick={() => running ? stopRun() : startRun()} />
+        <SBtn label="⏹ STOP" color="#ff8c00" onClick={stopRun} />
+        <SBtn label="🗑 CLEAR" color="#ff4444" onClick={() => setConfirmClear(true)} />
+        <SBtn label="✓ CHECK" color="#00b4ff" onClick={() => setCheck(validateTopology(nodes, edges))} />
+        <SBtn label="💾 SAVE" color="#9c6bff" onClick={() => doSave(1)} />
+        <SBtn label="📂 LOAD" color="#ffb300" onClick={() => setLoadOpen(true)} />
+      </div>
+
+      {/* CLEAR confirm */}
+      {confirmClear && (
+        <Modal onClose={() => setConfirmClear(false)}>
+          <div style={{ color: '#c8d8f0', fontSize: 12, lineHeight: 1.7, marginBottom: 14 }}>
+            Очистить холст? Все узлы будут удалены.<br />Биты не возвращаются.
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <SBtn label="Да, очистить" color="#ff4444" onClick={doClear} />
+            <SBtn label="Отмена" color="#5a7090" onClick={() => setConfirmClear(false)} />
+          </div>
+        </Modal>
+      )}
+
+      {/* CHECK result */}
+      {check && (
+        <Modal onClose={() => setCheck(null)}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 9, color: '#00b4ff', marginBottom: 12 }}>ПРОВЕРКА ТОПОЛОГИИ</div>
+          {check.lines.map((l, i) => (
+            <div key={i} style={{ fontSize: 11, color: l.color, lineHeight: 1.8 }}>{l.icon} {l.text}</div>
+          ))}
+          <div style={{ fontSize: 11, color: '#ffb300', marginTop: 12, lineHeight: 1.6, borderLeft: '2px solid #ffb300', paddingLeft: 8 }}>
+            РЕКОМЕНДАЦИЯ: {check.advice}
+          </div>
+          <div style={{ marginTop: 14 }}><SBtn label="Закрыть" color="#5a7090" onClick={() => setCheck(null)} /></div>
+        </Modal>
+      )}
+
+      {/* LOAD slots */}
+      {loadOpen && (
+        <Modal onClose={() => setLoadOpen(false)}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 9, color: '#ffb300', marginBottom: 12 }}>ЗАГРУЗИТЬ СОХРАНЕНИЕ</div>
+          {[1, 2, 3].map(slot => {
+            const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SLOT_KEY(slot)) : null
+            let info = 'пусто'; let has = false
+            if (raw) { try { const d: SaveSlot = JSON.parse(raw); info = `"${d.name}" — ${new Date(d.ts).toLocaleTimeString().slice(0, 5)}`; has = true } catch { /* */ } }
+            return (
+              <div key={slot} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, fontSize: 11, color: '#c8d8f0' }}>
+                <span>Слот {slot}: {info}</span>
+                {has ? <SBtn label={`Загр.${slot}`} color="#00e676" onClick={() => doLoad(slot)} />
+                     : <span style={{ color: '#3a4a5a', fontSize: 10 }}>—</span>}
+              </div>
+            )
+          })}
+          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+            <SBtn label="Save→2" color="#9c6bff" onClick={() => doSave(2)} />
+            <SBtn label="Save→3" color="#9c6bff" onClick={() => doSave(3)} />
+            <SBtn label="Отмена" color="#5a7090" onClick={() => setLoadOpen(false)} />
+          </div>
+        </Modal>
+      )}
 
       {/* context menu */}
       {ctx && (
@@ -317,6 +534,28 @@ export default function Sandbox() {
           </div>
         )
       })()}
+    </div>
+  )
+}
+
+function SBtn({ label, color, onClick }: { label: string; color: string; onClick: () => void }) {
+  const [hov, setHov] = useState(false)
+  return (
+    <button onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 9, padding: '8px 12px', cursor: 'pointer',
+        background: hov ? `${color}18` : '#0d1424', border: `1.5px solid ${hov ? color : '#1e2d4a'}`,
+        color: hov ? color : '#7a9ab8', whiteSpace: 'nowrap', transition: 'all .15s' }}>{label}</button>
+  )
+}
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+      style={{ position: 'fixed', inset: 0, background: '#070b1499', zIndex: 1300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onMouseDown={e => e.stopPropagation()} style={{ background: '#0d1424', border: '1.5px solid #1e2d4a',
+        boxShadow: '0 0 24px #00000088', padding: '18px 22px', fontFamily: '"Share Tech Mono", monospace', minWidth: 280, maxWidth: 420 }}>
+        {children}
+      </div>
     </div>
   )
 }
