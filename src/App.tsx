@@ -4,6 +4,7 @@ import NodePanel from './components/NodePanel'
 import ScenarioPanel from './components/ScenarioPanel'
 import ModeSwitcher from './components/ModeSwitcher'
 import Sandbox from './components/Sandbox'
+import EconomyHUD from './components/EconomyHUD'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -47,6 +48,8 @@ export default function App() {
         textShadow: '0 0 8px #00b4ff, 0 0 16px #00b4ff66', transition: 'right 0.25s ease' }}>
         STATUS::ONLINE
       </div>
+
+      <EconomyHUD />
 
       {isTopology && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
       <ScenarioPanel />

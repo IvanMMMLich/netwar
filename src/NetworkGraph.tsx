@@ -446,6 +446,8 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
 
   const packetsRef = useRef<Packet[]>([])
   const shardsRef  = useRef<Shard[]>([])
+  const incomeRef  = useRef<{ x: number; y: number; amt: number; start: number }[]>([])
+  const incomeGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
   const bouncesRef = useRef<Map<string, Bounce>>(new Map())
   const tspuFlashRef = useRef(0)
   const edgeUtilRef  = useRef<Map<string, number>>(new Map(EDGES.map(e => [e.id, 0])))
@@ -656,6 +658,10 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     // ── Packet & shard layers ──
     const pktGroup   = g.append('g'); pktGroupRef.current = pktGroup
     const shardGroup = g.append('g'); shardGroupRef.current = shardGroup
+    const incomeGroup = g.append('g'); incomeGroupRef.current = incomeGroup
+    function spawnIncome(id: string, amt: number) {
+      const pp = pos(id); incomeRef.current.push({ x: pp.x, y: pp.y, amt, start: performance.now() })
+    }
 
     // ── OSPF weight labels (visible only in OSPF mode) ──
     const wgtGroup = g.append('g').attr('class', 'weights').attr('opacity', 0)
@@ -857,11 +863,11 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const srcLbl = NODE_MAP.get(p.nodes[0])?.label ?? p.nodes[0]
           const dstSub = NODE_MAP.get(arrived)?.sublabel ?? arrived
           const lat = routeLatencyMs(p.nodes)
-          if (p.kind === 'http')   { cDel++; stat.passed++
+          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().earn(2); spawnIncome(arrived, 2)
             setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 5)) }
-          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++
+          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().earn(3); spawnIncome(arrived, 3)
             setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 5)) }
-          if (p.kind === 'dns')    { cDns++; stat.passed++
+          if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().earn(1); spawnIncome(arrived, 1)
             setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 5)) }
           if (p.kind === 'blocked') {
             // reached ТСПУ → shatter
@@ -983,6 +989,21 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           .attr('x', d => { const age = now - d.start; return d.x + d.vx * age - 1.5 })
           .attr('y', d => { const age = now - d.start; return d.y + d.vy * age - 1.5 })
           .attr('opacity', d => { const age = now - d.start; return Math.max(0, 1 - age / 400) })
+      }
+
+      // ── Render income floats (+N⬡) ──
+      if (incomeGroupRef.current) {
+        incomeRef.current = incomeRef.current.filter(f => now - f.start < 1000)
+        incomeGroupRef.current.selectAll<SVGTextElement, { x: number; y: number; amt: number; start: number }>('text')
+          .data(incomeRef.current, (_d, i) => i)
+          .join('text')
+          .text(d => `+${d.amt}⬡`)
+          .attr('text-anchor', 'middle')
+          .attr('font-family', '"Share Tech Mono", monospace').attr('font-size', '12px')
+          .attr('fill', '#ffb300')
+          .attr('x', d => d.x)
+          .attr('y', d => { const age = now - d.start; return d.y - 28 - (age / 1000) * 28 })
+          .attr('opacity', d => { const age = now - d.start; return Math.max(0, 1 - age / 1000) })
       }
 
       rafRef.current = requestAnimationFrame(loop)

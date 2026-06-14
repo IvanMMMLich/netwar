@@ -135,6 +135,7 @@ export default function Sandbox() {
   const bits = useStore(s => s.bits)
   const cleanIPs = useStore(s => s.cleanIPs)
   const spend = useStore(s => s.spend)
+  const addCleanIPs = useStore(s => s.addCleanIPs)
 
   const [nodes, setNodes] = useState<SbNode[]>([])
   const [edges, setEdges] = useState<SbEdge[]>([])
@@ -151,6 +152,8 @@ export default function Sandbox() {
   const [check, setCheck] = useState<CheckResult | null>(null)
   const [loadOpen, setLoadOpen] = useState(false)
   const [exploding, setExploding] = useState(false)
+  const [shopOpen, setShopOpen] = useState(false)
+  const [effects, setEffects] = useState<{ name: string; until: number; dur: number }[]>([])
   const [userCfg, setUserCfg] = useState<Record<string, UserCfg>>({})
   const [userPanel, setUserPanel] = useState<string | null>(null)
   const userCfgRef = useRef<Record<string, UserCfg>>({})
@@ -281,6 +284,13 @@ export default function Sandbox() {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, pinned: !n.pinned } : n)); setCtx(null)
   }, [])
   const deleteEdge = useCallback((id: string) => { setEdges(prev => prev.filter(e => e.id !== id)); setCtx(null); setEditEdge(null) }, [])
+
+  // tick shop effect timers
+  useEffect(() => {
+    if (!effects.length) return
+    const iv = setInterval(() => setEffects(prev => prev.filter(e => e.until > Date.now())), 500)
+    return () => clearInterval(iv)
+  }, [effects.length])
 
   // keep refs in sync for the sim loop
   useEffect(() => { nodesRef.current = nodes }, [nodes])
@@ -505,7 +515,47 @@ export default function Sandbox() {
         <SBtn label="✓ CHECK" color="#00b4ff" onClick={() => setCheck(validateTopology(nodes, edges))} />
         <SBtn label="💾 SAVE" color="#9c6bff" onClick={() => doSave(1)} />
         <SBtn label="📂 LOAD" color="#ffb300" onClick={() => setLoadOpen(true)} />
+        <SBtn label="⬡ SHOP" color="#ffb300" onClick={() => setShopOpen(true)} />
       </div>
+
+      {/* active effect timers */}
+      {effects.length > 0 && (
+        <div style={{ position: 'absolute', bottom: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 40,
+          fontFamily: '"Share Tech Mono", monospace', fontSize: 10, color: '#ffb300', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {effects.map((e, i) => {
+            const left = Math.max(0, Math.ceil((e.until - Date.now()) / 1000))
+            const filled = Math.max(0, Math.min(12, Math.round((left / e.dur) * 12)))
+            return <span key={i}>{e.name}: {left}с {'█'.repeat(filled)}{'░'.repeat(12 - filled)}</span>
+          })}
+        </div>
+      )}
+
+      {/* SHOP */}
+      {shopOpen && (
+        <Modal onClose={() => setShopOpen(false)}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color: '#ffb300', marginBottom: 14 }}>⬡ МАГАЗИН АПГРЕЙДОВ</div>
+          {[
+            { name: 'Апгрейд каналов ×2', desc: 'Все рёбра: BW ×2 на 60с', cost: '500 ⬡', buy: () => spend(500), dur: 60 },
+            { name: 'Обфускация трафика', desc: 'ТСПУ не видит протокол 30с', cost: '1 ◈', buy: () => spend(0, 1), dur: 30 },
+            { name: 'DNS ускорение', desc: 'DNS RESOLVED +3 (120с)', cost: '300 ⬡', buy: () => spend(300), dur: 120 },
+            { name: 'CDN boost', desc: 'CDN доход ×3 (60с)', cost: '800 ⬡', buy: () => spend(800), dur: 60 },
+            { name: 'Чистые IP × 3', desc: 'Добавляет 3 чистых IP', cost: '2000 ⬡', buy: () => { if (spend(2000)) { addCleanIPs(3); return true } return false }, dur: 0 },
+          ].map(item => (
+            <div key={item.name} style={{ borderTop: '1px solid #1e2d4a', padding: '10px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#c8d8f0' }}>{item.name}</div>
+                <div style={{ fontSize: 9, color: '#5a7090' }}>{item.desc}</div>
+                <div style={{ fontSize: 10, color: '#ffb300', marginTop: 2 }}>Цена: {item.cost}</div>
+              </div>
+              <SBtn label="КУПИТЬ" color="#00e676" onClick={() => {
+                if (item.buy()) { pushLog(`✓ Куплено: ${item.name}`); if (item.dur) setEffects(prev => [...prev.filter(e => e.name !== item.name), { name: item.name, until: Date.now() + item.dur * 1000, dur: item.dur }]) }
+                else pushLog(`⚠ Недостаточно средств: ${item.name}`)
+              }} />
+            </div>
+          ))}
+          <div style={{ marginTop: 12 }}><SBtn label="Закрыть" color="#5a7090" onClick={() => setShopOpen(false)} /></div>
+        </Modal>
+      )}
 
       {/* CLEAR confirm */}
       {confirmClear && (
