@@ -8,6 +8,7 @@ import EconomyHUD from './components/EconomyHUD'
 import EventSystem from './components/EventSystem'
 import LayersPanel from './components/LayersPanel'
 import HistoryView from './components/HistoryView'
+import SoundToggle from './components/SoundToggle'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -61,6 +62,7 @@ export default function App() {
         STATUS::ONLINE
       </div>
 
+      <SoundToggle />
       <EconomyHUD />
       {isTopology && <EventSystem />}
 

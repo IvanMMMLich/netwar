@@ -9,6 +9,7 @@ import {
   RouteTemplate, PacketKind,
 } from './data/topology'
 import { useStore, PKT_INCOME } from './store'
+import { audio } from './services/audioEngine'
 import ControlBar from './components/ControlBar'
 
 // ─── Packet model ──────────────────────────────────────────────────────────────
@@ -914,7 +915,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
               /* SNI or IP */ p.kind === 'blocked'
             if (blockedByMode) {
               tspuStatsRef.current.blocked++; cBlk++
-              spawnShards(arrived); tspuFlashRef.current = now
+              spawnShards(arrived); tspuFlashRef.current = now; audio.sfxBlocked()
               const reason = m === 'IP' ? 'блокировка по IP dst' : m === 'SNI' ? 'SNI=blocked.com' : m === 'HTTP' ? 'HTTP порт 80' : 'DNS подмена'
               setLog(prev => [`✕ ТСПУ[${m}]: ${reason} — BLOCK`, ...prev].slice(0, 3))
               counterRef.current.blocked++; onTspuBlocked(counterRef.current.blocked)
@@ -933,11 +934,11 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const srcLbl = NODE_MAP.get(p.nodes[0])?.label ?? p.nodes[0]
           const dstSub = NODE_MAP.get(arrived)?.sublabel ?? arrived
           const lat = routeLatencyMs(p.nodes)
-          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().scorePacket('http'); spawnIncome(arrived, PKT_INCOME.http); spawnResponse(p)
+          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().scorePacket('http'); spawnIncome(arrived, PKT_INCOME.http); spawnResponse(p); audio.sfxDelivered()
             setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 8)) }
-          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().scorePacket('tunnel'); spawnIncome(arrived, PKT_INCOME.tunnel); spawnResponse(p)
+          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().scorePacket('tunnel'); spawnIncome(arrived, PKT_INCOME.tunnel); spawnResponse(p); audio.sfxVpn()
             setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 8)) }
-          if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().scorePacket('dns'); spawnIncome(arrived, PKT_INCOME.dns)
+          if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().scorePacket('dns'); spawnIncome(arrived, PKT_INCOME.dns); audio.sfxDns()
             setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 8)) }
           // 'blocked' packets are fully handled by the ТСПУ mode interception above
           continue // remove
