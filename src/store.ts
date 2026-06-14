@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { SaveRepository, SaveState, loadRepo, saveRepo, commit, createBranch, checkout, merge, isMergeConflict } from './services/saveSystem'
 
 export interface Protocols {
   transport:   'TCP' | 'UDP'
@@ -13,7 +14,8 @@ export const PKT_INCOME: Record<string, number> = {
 }
 
 interface NetWarStore {
-  mode:                'topology' | 'sandbox'
+  mode:                'topology' | 'sandbox' | 'history'
+  repository:          SaveRepository
   // economy (expanded in block 6, reworked with upkeep)
   bits:                number      // sandbox spendable currency
   score:               number      // topology points (not spent)
@@ -35,7 +37,11 @@ interface NetWarStore {
   ospfSrcId:           string | null
   ospfDstId:           string | null
 
-  setMode:               (m: 'topology' | 'sandbox') => void
+  setMode:               (m: 'topology' | 'sandbox' | 'history') => void
+  gitCommit:             (message: string, state: SaveState) => string
+  gitBranch:             (name: string) => void
+  gitCheckout:           (hash: string) => void
+  gitMerge:              (branchName: string) => { ok: boolean; msg: string }
   spend:                 (bits: number, ips?: number) => boolean
   earn:                  (bits: number) => void
   scorePacket:           (kind: string) => void   // topology points
@@ -63,6 +69,7 @@ const SPEEDS = [0.5, 1, 1.5, 2]
 
 export const useStore = create<NetWarStore>((set, get) => ({
   mode:               'topology',
+  repository:         loadRepo(),
   bits:               500,
   score:              0,
   cleanIPs:           3,
@@ -84,6 +91,16 @@ export const useStore = create<NetWarStore>((set, get) => ({
   ospfDstId:  null,
 
   setMode:     m  => set({ mode: m }),
+  gitCommit: (message, state) => {
+    const repo = commit(get().repository, message, state); saveRepo(repo); set({ repository: repo }); return repo.head
+  },
+  gitBranch: (name) => { const repo = createBranch(get().repository, name); saveRepo(repo); set({ repository: repo }) },
+  gitCheckout: (hash) => { const repo = checkout(get().repository, hash); saveRepo(repo); set({ repository: repo }) },
+  gitMerge: (branchName) => {
+    const res = merge(get().repository, branchName)
+    if (isMergeConflict(res)) return { ok: false, msg: res.reason }
+    saveRepo(res); set({ repository: res }); return { ok: true, msg: `Merge successful → ${res.currentBranch}` }
+  },
   spend: (bits, ips = 0) => {
     const s = get()
     if (s.bits < bits || s.cleanIPs < ips) return false

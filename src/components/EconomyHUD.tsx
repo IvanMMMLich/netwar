@@ -20,6 +20,7 @@ export default function EconomyHUD() {
   const isTopology = mode === 'topology'
   const balance = incomeRate - upkeepRate
   const lowBalance = bits < 0
+  if (mode === 'history') return null
 
   const [levelUp, setLevelUp] = useState<string | null>(null)
   const prevLevel = useRef(asLevel)

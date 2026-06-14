@@ -7,6 +7,7 @@ import Sandbox from './components/Sandbox'
 import EconomyHUD from './components/EconomyHUD'
 import EventSystem from './components/EventSystem'
 import LayersPanel from './components/LayersPanel'
+import HistoryView from './components/HistoryView'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -25,7 +26,9 @@ export default function App() {
   const panelOpen = useStore(s => s.selectedNodeId !== null)
   const mode = useStore(s => s.mode)
   const layersMode = useStore(s => s.layersMode)
+  const branch = useStore(s => s.repository.currentBranch)
   const isTopology = mode === 'topology'
+  const onMain = branch === 'main'
 
   return (
     <div className="scanlines relative min-h-screen w-full bg-bg overflow-hidden">
@@ -37,15 +40,21 @@ export default function App() {
       </div>
 
       {/* SANDBOX — kept mounted so the canvas persists across switches */}
-      <div style={{ display: isTopology ? 'none' : 'block' }}>
+      <div style={{ display: mode === 'sandbox' ? 'block' : 'none' }}>
         <Sandbox />
       </div>
+
+      {mode === 'history' && <HistoryView />}
 
       <ModeSwitcher />
 
       <div style={{ ...HUD, top: 16, left: 16, color: '#00e676',
-        textShadow: '0 0 8px #00e676, 0 0 16px #00e67666' }}>
-        SYS::NETWAR v0.4.1
+        textShadow: '0 0 8px #00e676, 0 0 16px #00e67666', display: 'flex', gap: 10, alignItems: 'center' }}>
+        SYS::NETWAR v0.5.0
+        <span style={{ fontSize: 11, color: onMain ? '#00e676' : '#ffb300',
+          border: `1px solid ${onMain ? '#00e67655' : '#ffb30055'}`, padding: '1px 7px' }}>
+          {branch} ●
+        </span>
       </div>
       <div style={{ ...HUD, top: 16, right: panelOpen && isTopology ? PANEL_WIDTH + 16 : 16, color: '#00b4ff',
         textShadow: '0 0 8px #00b4ff, 0 0 16px #00b4ff66', transition: 'right 0.25s ease' }}>

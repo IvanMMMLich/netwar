@@ -43,6 +43,7 @@ export default function ModeSwitcher() {
     }}>
       <ModeButton label="TOPOLOGY" active={mode === 'topology'} onClick={() => setMode('topology')} />
       <ModeButton label="SANDBOX"  active={mode === 'sandbox'}  onClick={() => setMode('sandbox')} />
+      <ModeButton label="HISTORY"  active={mode === 'history'}  onClick={() => setMode('history')} />
     </div>
   )
 }

@@ -126,6 +126,18 @@ export default function Sandbox() {
   const negativeSince = useRef(0)
   const [costFloat, setCostFloat] = useState<{ id: number; x: number; y: number; amt: number } | null>(null)
 
+  // ── git save system (block 1) ──
+  const repository = useStore(s => s.repository)
+  const asLevel = useStore(s => s.asLevel)
+  const gitCommit = useStore(s => s.gitCommit)
+  const gitBranch = useStore(s => s.gitBranch)
+  const gitCheckout = useStore(s => s.gitCheckout)
+  const gitMerge = useStore(s => s.gitMerge)
+  const [termInput, setTermInput] = useState('')
+  const [termOut, setTermOut] = useState<string[]>(['NetWars shell — введи "help" для списка команд'])
+  const [mergeFlash, setMergeFlash] = useState(false)
+  const onMain = repository.currentBranch === 'main'
+
   const [nodes, setNodes] = useState<SbNode[]>([])
   const [edges, setEdges] = useState<SbEdge[]>([])
   const [drag, setDrag] = useState<DragState | null>(null)         // toolbar drag
@@ -460,6 +472,50 @@ export default function Sandbox() {
     setLoadOpen(false)
   }, [pushLog])
 
+  // ── terminal command handler (block 1) ──
+  const termPrint = useCallback((...lines: string[]) => setTermOut(p => [...p, ...lines].slice(-40)), [])
+  const runCmd = useCallback((raw: string) => {
+    const line = raw.trim()
+    termPrint(`netwar@sandbox:~/${repository.currentBranch} $ ${line}`)
+    if (!line) return
+    const m = line.match(/^(\w+)\s*(.*)$/); const cmd = m?.[1]?.toLowerCase(); const arg = m?.[2]?.trim() ?? ''
+    const buildState = () => ({ nodes, edges, economy: { bits: Math.round(bits), cleanIPs, asLevel }, stats: { delivered: 0, blocked: 0 } })
+    if (cmd === 'save') {
+      const msg = arg.replace(/^["']|["']$/g, '') || 'без описания'
+      const hash = gitCommit(msg, buildState()); termPrint(`Committed ${hash} '${msg}'`)
+    } else if (cmd === 'branch') {
+      if (!arg) { termPrint('usage: branch <имя>'); return }
+      gitBranch(arg); termPrint(`Switched to new branch '${arg}'`)
+    } else if (cmd === 'checkout') {
+      const c = repository.commits.find(x => x.hash === arg)
+      if (!c) { termPrint(`commit ${arg} не найден`); return }
+      gitCheckout(arg); setNodes(c.state.nodes as SbNode[]); setEdges(c.state.edges as SbEdge[]); termPrint(`HEAD → ${arg} (узлы восстановлены)`)
+    } else if (cmd === 'merge') {
+      if (!arg) { termPrint('usage: merge <ветка>'); return }
+      const res = gitMerge(arg)
+      if (res.ok) { termPrint(res.msg); setMergeFlash(true); setTimeout(() => setMergeFlash(false), 2300) }
+      else termPrint(`⚠ CONFLICT: ${res.msg}`)
+    } else if (cmd === 'log') {
+      const hist = [...repository.commits].reverse().slice(0, 10)
+      if (!hist.length) termPrint('нет коммитов'); else hist.forEach(c => termPrint(`${c.hash} [${c.branch}] ${c.message}`))
+    } else if (cmd === 'status') {
+      termPrint(`На ветке ${repository.currentBranch}`, `HEAD: ${repository.head || '(нет коммитов)'}`, `Узлов: ${nodes.length}  Рёбер: ${edges.length}`)
+    } else if (cmd === 'help') {
+      termPrint('save "msg" — коммит', 'branch <имя> — новая ветка', 'checkout <хэш> — загрузить коммит',
+        'merge <ветка> — смержить в текущую', 'log — история', 'status — статус', 'clear — очистить терминал')
+    } else if (cmd === 'clear') {
+      setTermOut([])
+    } else {
+      termPrint(`unknown command: ${cmd}. Type 'help' for commands`)
+    }
+  }, [repository, nodes, edges, bits, cleanIPs, asLevel, gitCommit, gitBranch, gitCheckout, gitMerge, termPrint])
+
+  // apply a state loaded from HISTORY view
+  useEffect(() => {
+    const onLoad = (e: Event) => { const st = (e as CustomEvent).detail; if (st) { setNodes(st.nodes as SbNode[]); setEdges(st.edges as SbEdge[]); pushLog('📂 Состояние коммита загружено') } }
+    window.addEventListener('netwar-load-state', onLoad); return () => window.removeEventListener('netwar-load-state', onLoad)
+  }, [pushLog])
+
   // ── tutorial missions (block 8) ──
   const earn = useStore(s => s.earn)
   useEffect(() => {
@@ -557,7 +613,9 @@ export default function Sandbox() {
   void tick // re-render trigger
 
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#070b14' }}
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#070b14',
+        border: mergeFlash ? '2px solid #00e676' : onMain ? 'none' : '2px solid #ffb300',
+        boxShadow: mergeFlash ? 'inset 0 0 40px #ffffff44' : 'none', transition: 'border-color .3s' }}
       onMouseDown={() => { setSelected(null); setCtx(null) }}>
       {/* ── Toolbar ── */}
       <div onMouseDown={e => e.stopPropagation()} style={{ width: TOOLBAR_W, flexShrink: 0, background: '#0d1424',
@@ -734,6 +792,27 @@ export default function Sandbox() {
           onApply={(c) => { setUserCfg(prev => ({ ...prev, [userPanel]: c })); pushLog('✓ Настройки User применены'); setUserPanel(null) }}
           onClose={() => setUserPanel(null)} />
       )}
+
+      {/* terminal line (above bottom controls) */}
+      <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 76, left: 90, right: 16, zIndex: 42,
+        background: '#070b14', border: `1px solid ${onMain ? '#1e2d4a' : '#ffb30055'}`, fontFamily: '"Share Tech Mono", monospace' }}>
+        {termOut.length > 0 && (
+          <div style={{ maxHeight: 110, overflowY: 'auto', padding: '6px 10px', fontSize: 11, color: '#7a9ab8', lineHeight: 1.6 }}>
+            {termOut.slice(-8).map((l, i) => (
+              <div key={i} style={{ color: l.startsWith('Committed') || l.startsWith('Merge') || l.startsWith('Switched') ? '#00e676'
+                : l.includes('CONFLICT') || l.startsWith('unknown') ? '#ff8c00' : l.startsWith('netwar@') ? '#00b4ff' : '#7a9ab8' }}>{l}</div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', height: 32, padding: '0 10px', borderTop: termOut.length ? '1px solid #1e2d4a' : 'none' }}>
+          <span style={{ color: '#00e676', fontSize: 11, marginRight: 6, whiteSpace: 'nowrap' }}>netwar@sandbox:~/{repository.currentBranch} $</span>
+          <input value={termInput} onChange={e => setTermInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { runCmd(termInput); setTermInput('') } }}
+            placeholder='save "описание"  |  help'
+            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#00e676',
+              fontFamily: '"Share Tech Mono", monospace', fontSize: 11 }} />
+        </div>
+      </div>
 
       {/* bottom control panel */}
       <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
