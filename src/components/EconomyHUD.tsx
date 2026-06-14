@@ -7,12 +7,19 @@ const AS_UNLOCK: Record<number, string> = { 2: 'VPN серверы и Firewall',
 
 export default function EconomyHUD() {
   const bits = useStore(s => s.bits)
+  const score = useStore(s => s.score)
   const cleanIPs = useStore(s => s.cleanIPs)
   const asLevel = useStore(s => s.asLevel)
   const totalIncome = useStore(s => s.totalIncome)
+  const upkeepRate = useStore(s => s.upkeepRate)
+  const incomeRate = useStore(s => s.incomeRate)
+  const mode = useStore(s => s.mode)
   const setAsLevel = useStore(s => s.setAsLevel)
   const earn = useStore(s => s.earn)
   const panelOpen = useStore(s => s.selectedNodeId !== null && s.mode === 'topology')
+  const isTopology = mode === 'topology'
+  const balance = incomeRate - upkeepRate
+  const lowBalance = bits < 0
 
   const [levelUp, setLevelUp] = useState<string | null>(null)
   const prevLevel = useRef(asLevel)
@@ -41,11 +48,28 @@ export default function EconomyHUD() {
       <div style={{
         position: 'absolute', top: 38, right: panelOpen ? 316 : 16, zIndex: 60,
         fontFamily: '"Share Tech Mono", monospace', fontSize: 12,
-        display: 'flex', gap: 16, pointerEvents: 'none', transition: 'right .25s ease',
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4,
+        pointerEvents: 'none', transition: 'right .25s ease',
+        animation: lowBalance && !isTopology ? 'sbflash .8s infinite' : 'none',
+        padding: lowBalance && !isTopology ? '2px 6px' : 0,
       }}>
-        <span style={{ color: '#ffb300', textShadow: '0 0 6px #ffb30066' }}>БИТЫ: {bits.toLocaleString()} ⬡</span>
-        <span style={{ color: '#9c6bff', textShadow: '0 0 6px #9c6bff66' }}>ЧИП-IP: {cleanIPs} ◈</span>
-        <span style={{ color: '#00b4ff', textShadow: '0 0 6px #00b4ff66' }}>AS LEVEL: {asLevel}</span>
+        {isTopology ? (
+          <span style={{ color: '#00e676', textShadow: '0 0 6px #00e67666' }}>ОЧКИ: {score.toLocaleString()}</span>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <span style={{ color: lowBalance ? '#ff4444' : '#ffb300', textShadow: '0 0 6px #ffb30066' }}>БИТЫ: {Math.round(bits).toLocaleString()} ⬡</span>
+              <span style={{ color: '#9c6bff', textShadow: '0 0 6px #9c6bff66' }}>ЧИП-IP: {cleanIPs} ◈</span>
+              <span style={{ color: '#00b4ff', textShadow: '0 0 6px #00b4ff66' }}>AS LEVEL: {asLevel}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 14, fontSize: 11 }}>
+              <span style={{ color: '#ff4444' }}>РАСХОД: -{upkeepRate.toFixed(1)} ⬡/с</span>
+              <span style={{ color: '#00e676' }}>ДОХОД: +{incomeRate.toFixed(1)} ⬡/с</span>
+              <span style={{ color: balance >= 0 ? '#00e676' : '#ff4444' }}>БАЛАНС: {balance >= 0 ? '+' : ''}{balance.toFixed(1)} ⬡/с</span>
+            </div>
+            {lowBalance && <span style={{ color: '#ff4444', fontSize: 11 }}>⚠ Баланс отрицательный! Удали дорогие узлы</span>}
+          </>
+        )}
       </div>
 
       {/* level-up flash */}

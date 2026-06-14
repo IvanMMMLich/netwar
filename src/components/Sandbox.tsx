@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
-  sbEdgeParams, sbBwWidth, sbBwLabel,
+  sbEdgeParams, sbBwWidth, sbBwLabel, SB_UPKEEP, edgeUpkeep,
 } from '../data/sandbox'
 import {
   buildAdj, bfsToType, findPath, validateTopology, getConnectionHint,
@@ -11,7 +11,7 @@ import {
 
 const TOOLBAR_W = 80
 
-export interface SbNode { id: string; type: SbType; x: number; y: number; pinned: boolean; born: number }
+export interface SbNode { id: string; type: SbType; x: number; y: number; pinned: boolean; born: number; disabled?: boolean }
 export interface SbEdge { id: string; source: string; target: string; bw: number; latency: number; loss: number; born: number }
 
 let sbId = 0
@@ -85,6 +85,15 @@ export default function Sandbox() {
   const cleanIPs = useStore(s => s.cleanIPs)
   const spend = useStore(s => s.spend)
   const addCleanIPs = useStore(s => s.addCleanIPs)
+  const earnPacket = useStore(s => s.earnPacket)
+  const chargeUpkeep = useStore(s => s.chargeUpkeep)
+  const setRates = useStore(s => s.setRates)
+  const mode = useStore(s => s.mode)
+  const earnPacketRef = useRef(earnPacket)
+  useEffect(() => { earnPacketRef.current = earnPacket }, [earnPacket])
+  const incomeAccum = useRef(0)
+  const negativeSince = useRef(0)
+  const [costFloat, setCostFloat] = useState<{ id: number; x: number; y: number; amt: number } | null>(null)
 
   const [nodes, setNodes] = useState<SbNode[]>([])
   const [edges, setEdges] = useState<SbEdge[]>([])
@@ -273,6 +282,45 @@ export default function Sandbox() {
   useEffect(() => { nodesRef.current = nodes }, [nodes])
   useEffect(() => { edgesRef.current = edges }, [edges])
 
+  // ── per-second economy: upkeep (always) + income rate (while RUN) ──
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (mode !== 'sandbox') return
+      const ns = nodesRef.current, es = edgesRef.current
+      const upkeep = ns.reduce((s, n) => s + (n.disabled ? 0 : SB_UPKEEP[n.type]), 0)
+                   + es.reduce((s, e) => s + edgeUpkeep(e.bw), 0)
+      const income = incomeAccum.current; incomeAccum.current = 0
+      if (upkeep > 0) chargeUpkeep(upkeep)
+      setRates(upkeep, income)
+      // negative-balance shutdown after 30s
+      if (useStore.getState().bits < 0) {
+        if (!negativeSince.current) negativeSince.current = Date.now()
+        else if (Date.now() - negativeSince.current > 30000) {
+          const candidates = ns.filter(n => !n.disabled && n.type !== 'User')
+          if (candidates.length) {
+            const victim = candidates[Math.floor(Math.random() * candidates.length)]
+            setNodes(prev => prev.map(p => p.id === victim.id ? { ...p, disabled: true } : p))
+            pushLog(`💸 ${SB_BY_TYPE.get(victim.type)!.full} отключён — нет средств на содержание`)
+            negativeSince.current = Date.now()
+          }
+        }
+      } else negativeSince.current = 0
+    }, 1000)
+    return () => clearInterval(iv)
+  }, [mode, chargeUpkeep, setRates, pushLog])
+
+  // ── cost float over the most expensive node every 5s ──
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (mode !== 'sandbox') return
+      const ns = nodesRef.current
+      let max: SbNode | null = null; let maxCost = 0
+      for (const n of ns) { const c = SB_UPKEEP[n.type]; if (c > maxCost) { maxCost = c; max = n } }
+      if (max && maxCost > 0) { setCostFloat({ id: Date.now(), x: max.x, y: max.y, amt: maxCost }); setTimeout(() => setCostFloat(null), 1000) }
+    }, 5000)
+    return () => clearInterval(iv)
+  }, [mode])
+
   // ── RUN / STOP ──
   const startRun = useCallback(() => {
     const users = nodes.filter(n => n.type === 'User')
@@ -314,6 +362,7 @@ export default function Sandbox() {
           if (!b) continue
           // protocol-aware DPI at ТСПУ (block 5)
           const nb = ns.find(n => n.id === b)
+          if (nb?.disabled) continue   // disabled node drops traffic (point 3)
           if (nb?.type === 'ТСПУ') {
             const c = pk.cfg
             let blocked = false
@@ -337,7 +386,16 @@ export default function Sandbox() {
             if (blocked) continue   // dropped at ТСПУ
           }
           pk.elapsed += dt
-          if (pk.elapsed >= 600) { pk.seg++; pk.elapsed = 0; if (pk.seg >= pk.path.length - 1) continue }
+          if (pk.elapsed >= 600) {
+            pk.seg++; pk.elapsed = 0
+            if (pk.seg >= pk.path.length - 1) {
+              // delivered → earn bits (income only while RUN)
+              const c = pk.cfg
+              const kind = c.vpn !== 'none' ? 'tunnel' : c.application === 'DNS' || c.application === 'DoH' ? 'dns' : c.transport === 'UDP' ? 'udp' : 'tcp'
+              earnPacketRef.current(kind); incomeAccum.current += (kind === 'tunnel' ? 8 : kind === 'dns' ? 2 : kind === 'udp' ? 3 : 5)
+              continue
+            }
+          }
           survivors.push(pk)
         }
         pktRef.current = survivors
@@ -537,10 +595,20 @@ export default function Sandbox() {
           </div>
         )}
 
+        {/* cost float (-N⬡) over most expensive node */}
+        {costFloat && (
+          <div style={{ position: 'absolute', left: costFloat.x, top: costFloat.y - 6, transform: 'translate(-50%,0)',
+            fontFamily: '"Share Tech Mono", monospace', fontSize: 12, color: '#ff4444', pointerEvents: 'none',
+            animation: 'costFloat 1s ease-out forwards', zIndex: 20 }}>
+            -{costFloat.amt} ⬡
+          </div>
+        )}
+
         {/* nodes */}
         {nodes.map(n => {
           const item = SB_BY_TYPE.get(n.type)!
           const isSel = selected === n.id
+          const col = n.disabled ? '#3a4a5a' : item.color
           return (
             <div key={n.id}
               onMouseDown={onNodeMouseDown(n.id)}
@@ -550,14 +618,15 @@ export default function Sandbox() {
               style={{ position: 'absolute', left: n.x, top: n.y, width: SB_NODE_SIZE, height: SB_NODE_SIZE,
                 transform: 'translate(-50%,-50%)', animation: exploding ? 'sbfade .5s ease-in forwards'
                   : (performance.now() - n.born < 450 ? (n.type === 'ТСПУ' ? 'sbinject .4s ease-out' : 'sbpop .2s ease-out') : 'none'),
-                border: `2px solid ${isSel ? '#00e676' : item.color}`, borderRadius: 3, background: `${item.color}1a`,
+                border: `2px solid ${isSel ? '#00e676' : col}`, borderRadius: 3, background: `${col}1a`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: n.pinned ? 'default' : 'grab',
-                fontFamily: '"Press Start 2P", cursive', fontSize: item.label.length > 2 ? 8 : 14, color: item.color,
-                boxShadow: isSel ? '0 0 12px #00e676aa' : `0 0 8px ${item.color}66` }}>
+                fontFamily: '"Press Start 2P", cursive', fontSize: item.label.length > 2 ? 8 : 14, color: col,
+                boxShadow: isSel ? '0 0 12px #00e676aa' : `0 0 8px ${col}66` }}>
               {item.label}
               {n.pinned && <span style={{ position: 'absolute', top: -16, fontSize: 11 }}>📌</span>}
+              {n.disabled && <span style={{ position: 'absolute', top: -16, fontSize: 9, color: '#ff4444' }}>OFF</span>}
               <span style={{ position: 'absolute', bottom: -16, fontFamily: '"Share Tech Mono", monospace',
-                fontSize: 9, color: item.color, whiteSpace: 'nowrap', pointerEvents: 'none' }}>{item.full}</span>
+                fontSize: 9, color: col, whiteSpace: 'nowrap', pointerEvents: 'none' }}>{item.full}</span>
             </div>
           )
         })}

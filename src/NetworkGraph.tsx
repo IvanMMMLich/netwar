@@ -8,7 +8,7 @@ import {
   buildHttpRoute, buildBlockedRoute, buildTunnelRoute, buildDnsRoute,
   RouteTemplate, PacketKind,
 } from './data/topology'
-import { useStore } from './store'
+import { useStore, PKT_INCOME } from './store'
 import ControlBar from './components/ControlBar'
 
 // ─── Packet model ──────────────────────────────────────────────────────────────
@@ -892,11 +892,11 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const srcLbl = NODE_MAP.get(p.nodes[0])?.label ?? p.nodes[0]
           const dstSub = NODE_MAP.get(arrived)?.sublabel ?? arrived
           const lat = routeLatencyMs(p.nodes)
-          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().earn(2); spawnIncome(arrived, 2); spawnResponse(p)
+          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().scorePacket('http'); spawnIncome(arrived, PKT_INCOME.http); spawnResponse(p)
             setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 8)) }
-          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().earn(3); spawnIncome(arrived, 3); spawnResponse(p)
+          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().scorePacket('tunnel'); spawnIncome(arrived, PKT_INCOME.tunnel); spawnResponse(p)
             setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 8)) }
-          if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().earn(1); spawnIncome(arrived, 1)
+          if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().scorePacket('dns'); spawnIncome(arrived, PKT_INCOME.dns)
             setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 8)) }
           if (p.kind === 'blocked') {
             // reached ТСПУ → shatter

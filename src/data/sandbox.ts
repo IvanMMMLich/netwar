@@ -59,3 +59,13 @@ export function sbBwWidth(bw: number): number {
 export function sbBwLabel(bw: number): string {
   return bw >= 1000 ? `${bw / 1000} Гбит/с` : `${bw} Мбит/с`
 }
+
+// ─── Upkeep (bits/sec) ─────────────────────────────────────────────────────────
+export const SB_UPKEEP: Record<SbType, number> = {
+  User: 0, Switch: 1, Router: 3, DNS: 2, VPN: 5, Firewall: 4, WebServer: 3, CDN: 4, ТСПУ: 0,
+}
+export function edgeUpkeep(bw: number): number {
+  if (bw >= 10000) return 5
+  if (bw >= 1000)  return 2
+  return 0.5
+}

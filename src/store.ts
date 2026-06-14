@@ -7,13 +7,21 @@ export interface Protocols {
   dns:         'DNS' | 'DoH' | 'DoT'
 }
 
+// income per delivered packet kind (sandbox = bits, topology = score)
+export const PKT_INCOME: Record<string, number> = {
+  http: 5, tcp: 5, udp: 3, dns: 2, tunnel: 8, vpn: 8, cdn: 4, blocked: 0,
+}
+
 interface NetWarStore {
   mode:                'topology' | 'sandbox'
-  // economy (expanded in block 6)
-  bits:                number
+  // economy (expanded in block 6, reworked with upkeep)
+  bits:                number      // sandbox spendable currency
+  score:               number      // topology points (not spent)
   cleanIPs:            number
   asLevel:             number
   totalIncome:         number
+  upkeepRate:          number      // bits/sec spent on upkeep (sandbox)
+  incomeRate:          number      // bits/sec earned (sandbox)
   paused:              boolean
   speed:               number
   speedIdx:            number
@@ -29,6 +37,10 @@ interface NetWarStore {
   setMode:               (m: 'topology' | 'sandbox') => void
   spend:                 (bits: number, ips?: number) => boolean
   earn:                  (bits: number) => void
+  scorePacket:           (kind: string) => void   // topology points
+  earnPacket:            (kind: string) => void    // sandbox bits
+  chargeUpkeep:          (bits: number) => void     // can go negative
+  setRates:              (upkeep: number, income: number) => void
   addCleanIPs:           (n: number) => void
   setAsLevel:            (n: number) => void
   setPaused:             (v: boolean) => void
@@ -49,10 +61,13 @@ const SPEEDS = [0.5, 1, 1.5, 2]
 
 export const useStore = create<NetWarStore>((set, get) => ({
   mode:               'topology',
-  bits:               1000,
-  cleanIPs:           5,
+  bits:               500,
+  score:              0,
+  cleanIPs:           3,
   asLevel:            1,
   totalIncome:        0,
+  upkeepRate:         0,
+  incomeRate:         0,
   paused:             false,
   speed:              1,
   speedIdx:           1,
@@ -73,6 +88,10 @@ export const useStore = create<NetWarStore>((set, get) => ({
     return true
   },
   earn: (bits) => set(s => ({ bits: s.bits + bits, totalIncome: s.totalIncome + bits })),
+  scorePacket: (kind) => set(s => ({ score: s.score + (PKT_INCOME[kind] ?? 0) })),
+  earnPacket: (kind) => set(s => { const v = PKT_INCOME[kind] ?? 0; return { bits: s.bits + v, totalIncome: s.totalIncome + v } }),
+  chargeUpkeep: (bits) => set(s => ({ bits: s.bits - bits })),
+  setRates: (upkeep, income) => set({ upkeepRate: upkeep, incomeRate: income }),
   addCleanIPs: (n) => set(s => ({ cleanIPs: s.cleanIPs + n })),
   setAsLevel: (n) => set({ asLevel: n }),
   setPaused:   v  => set({ paused: v }),
