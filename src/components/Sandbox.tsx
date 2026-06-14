@@ -13,7 +13,26 @@ export interface SbEdge { id: string; source: string; target: string; bw: number
 let sbId = 0
 const newId = (p: string) => `${p}-${sbId++}`
 
-export interface SbPacket { id: number; path: string[]; seg: number; elapsed: number; blocked: boolean }
+export interface UserCfg {
+  transport: 'TCP' | 'UDP'
+  application: 'HTTP' | 'HTTPS' | 'DNS' | 'DoH'
+  vpn: 'none' | 'WireGuard' | 'VLESS' | 'Shadowsocks'
+  dest: 'ws-google' | 'ws-news' | 'ws-blocked'
+}
+const DEFAULT_CFG: UserCfg = { transport: 'UDP', application: 'HTTPS', vpn: 'VLESS', dest: 'ws-google' }
+
+// packet colour by protocol/vpn (block 5)
+function pktColor(cfg: UserCfg): string {
+  if (cfg.vpn === 'WireGuard') return '#9c6bff'
+  if (cfg.vpn === 'VLESS') return '#9c6bff'
+  if (cfg.vpn === 'Shadowsocks') return '#6b4bbf'
+  if (cfg.application === 'HTTP') return '#ff8c00'
+  if (cfg.application === 'DoH') return '#00e676'
+  if (cfg.application === 'DNS') return '#ffb300'
+  return '#00b4ff' // HTTPS
+}
+
+export interface SbPacket { id: number; path: string[]; seg: number; elapsed: number; blocked: boolean; color: string; cfg: UserCfg }
 let sbPktId = 0
 
 // adjacency (undirected) from edges
@@ -132,6 +151,11 @@ export default function Sandbox() {
   const [check, setCheck] = useState<CheckResult | null>(null)
   const [loadOpen, setLoadOpen] = useState(false)
   const [exploding, setExploding] = useState(false)
+  const [userCfg, setUserCfg] = useState<Record<string, UserCfg>>({})
+  const [userPanel, setUserPanel] = useState<string | null>(null)
+  const userCfgRef = useRef<Record<string, UserCfg>>({})
+  useEffect(() => { userCfgRef.current = userCfg }, [userCfg])
+  const wgStart = useRef<number>(0)  // WireGuard detection timer
 
   const pktRef = useRef<SbPacket[]>([])
   const runRef = useRef(false)
@@ -225,7 +249,10 @@ export default function Sandbox() {
   // click logic: select → connect
   const handleNodeClick = useCallback((id: string) => {
     setSelected(prevSel => {
-      if (!prevSel) return id                      // select first
+      if (!prevSel) {
+        if (nodeById(id)?.type === 'User') setUserPanel(id)   // open settings (block 5)
+        return id                                  // select first
+      }
       if (prevSel === id) return null              // deselect
       // create edge prevSel → id
       const a = nodeById(prevSel), b = nodeById(id)
@@ -265,14 +292,20 @@ export default function Sandbox() {
     const users = nodes.filter(n => n.type === 'User')
     const anyPath = users.some(u => bfsTo(adj, u.id, id => nodes.find(n => n.id === id)?.type === 'WebServer'))
     if (!anyPath) { pushLog('⚠ ОШИБКА: нет маршрута от User до WebServer'); return }
-    runRef.current = true; setRunning(true); pushLog('▶ Симуляция запущена')
+    runRef.current = true; setRunning(true); wgStart.current = performance.now(); logThrottle.current.clear(); pushLog('▶ Симуляция запущена')
   }, [nodes, edges, pushLog])
 
   const stopRun = useCallback(() => {
     runRef.current = false; setRunning(false); pktRef.current = []; setTick(t => t + 1); pushLog('⏹ Симуляция остановлена')
   }, [pushLog])
 
+  const logThrottle = useRef<Map<string, number>>(new Map())
   useEffect(() => {
+    const logOnce = (msg: string) => {
+      const t = logThrottle.current.get(msg) ?? 0
+      const n = performance.now()
+      if (n - t > 4000) { logThrottle.current.set(msg, n); pushLog(msg) }
+    }
     const loop = (now: number) => {
       const dt = lastFrame.current ? now - lastFrame.current : 16; lastFrame.current = now
       if (runRef.current) {
@@ -285,16 +318,40 @@ export default function Sandbox() {
           const target = Math.random() < 0.7 ? 'WebServer' : 'DNS'
           const path = bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === target)
             ?? bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === 'WebServer')
-          if (path && path.length > 1) pktRef.current.push({ id: sbPktId++, path, seg: 0, elapsed: 0, blocked: false })
+          if (path && path.length > 1) {
+            const cfg = userCfgRef.current[u.id] ?? DEFAULT_CFG
+            pktRef.current.push({ id: sbPktId++, path, seg: 0, elapsed: 0, blocked: false, color: pktColor(cfg), cfg })
+          }
           lastSpawn.current = now
         }
         const survivors: SbPacket[] = []
         for (const pk of pktRef.current) {
           const a = pk.path[pk.seg], b = pk.path[pk.seg + 1]
           if (!b) continue
-          // block at ТСПУ if no VPN on path
+          // protocol-aware DPI at ТСПУ (block 5)
           const nb = ns.find(n => n.id === b)
-          if (nb?.type === 'ТСПУ' && !hasVpn) { continue }   // dropped
+          if (nb?.type === 'ТСПУ') {
+            const c = pk.cfg
+            let blocked = false
+            if (c.vpn === 'WireGuard') {
+              // detectable ~30s after run start
+              if (wgStart.current && now - wgStart.current > 30000) { blocked = true; logOnce('DPI: WireGuard сигнатура обнаружена') }
+            } else if (c.vpn === 'VLESS') {
+              logOnce('VLESS маскируется под HTTPS — ТСПУ слеп')
+            } else if (c.vpn === 'Shadowsocks') {
+              if (Math.random() < 0.5) { blocked = true; logOnce('Shadowsocks: обфускация частично эффективна') }
+            } else if (c.application === 'HTTP') {
+              logOnce('ТСПУ читает HTTP открыто')
+              if (c.dest === 'ws-blocked') blocked = true
+            } else if (c.application === 'HTTPS') {
+              if (c.dest === 'ws-blocked') { blocked = true; logOnce('ТСПУ видит SNI: blocked.com') }
+            } else if (c.application === 'DoH') {
+              logOnce('DoH: DNS зашифрован — ТСПУ слеп')
+            } else if (c.application === 'DNS') {
+              logOnce('ТСПУ видит DNS-запрос')
+            }
+            if (blocked) continue   // dropped at ТСПУ
+          }
           pk.elapsed += dt
           if (pk.elapsed >= 600) { pk.seg++; pk.elapsed = 0; if (pk.seg >= pk.path.length - 1) continue }
           survivors.push(pk)
@@ -306,7 +363,7 @@ export default function Sandbox() {
     }
     rafRef.current = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [])
+  }, [pushLog])
 
   const doClear = useCallback(() => {
     setExploding(true)
@@ -383,8 +440,8 @@ export default function Sandbox() {
             const a = nodeById(pk.path[pk.seg]), b = nodeById(pk.path[pk.seg + 1]); if (!a || !b) return null
             const t = Math.min(pk.elapsed / 600, 1)
             const x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t
-            return <rect key={pk.id} x={x - 3} y={y - 3} width={6} height={6} fill="#00b4ff"
-              style={{ filter: 'drop-shadow(0 0 4px #00b4ff)' }} />
+            return <rect key={pk.id} x={x - 3} y={y - 3} width={6} height={6} fill={pk.color}
+              style={{ filter: `drop-shadow(0 0 4px ${pk.color})` }} />
           })}
         </svg>
 
@@ -429,6 +486,15 @@ export default function Sandbox() {
           </div>
         )}
       </div>
+
+      {/* User settings panel (block 5) */}
+      {userPanel && nodeById(userPanel)?.type === 'User' && (
+        <UserSettings
+          id={userPanel}
+          cfg={userCfg[userPanel] ?? DEFAULT_CFG}
+          onApply={(c) => { setUserCfg(prev => ({ ...prev, [userPanel]: c })); pushLog('✓ Настройки User применены'); setUserPanel(null) }}
+          onClose={() => setUserPanel(null)} />
+      )}
 
       {/* bottom control panel */}
       <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
@@ -534,6 +600,54 @@ export default function Sandbox() {
           </div>
         )
       })()}
+    </div>
+  )
+}
+
+function UserSettings({ id, cfg, onApply, onClose }: {
+  id: string; cfg: UserCfg; onApply: (c: UserCfg) => void; onClose: () => void
+}) {
+  const [c, setC] = useState<UserCfg>(cfg)
+  const Radio = <K extends keyof UserCfg>(key: K, val: UserCfg[K], label: string, hint?: string) => (
+    <div onClick={() => setC(p => ({ ...p, [key]: val }))}
+      style={{ cursor: 'pointer', display: 'flex', gap: 8, padding: '4px 0', alignItems: 'flex-start' }}>
+      <span style={{ color: c[key] === val ? '#00e676' : '#5a7090' }}>{c[key] === val ? '●' : '○'}</span>
+      <div>
+        <span style={{ color: c[key] === val ? '#c8d8f0' : '#7a9ab8', fontSize: 11 }}>{label}</span>
+        {hint && <div style={{ color: '#4a6a8a', fontSize: 9, lineHeight: 1.4 }}>{hint}</div>}
+      </div>
+    </div>
+  )
+  const Hdr = (t: string) => <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 7, color: '#4a6a8a', margin: '12px 0 4px', letterSpacing: '0.08em' }}>{t}</div>
+  return (
+    <div onMouseDown={e => e.stopPropagation()} style={{ position: 'fixed', top: 0, right: 0, width: 300, height: '100vh',
+      background: '#0d1424', borderLeft: '2px solid #f0f4ff', boxShadow: '-8px 0 24px #f0f4ff11', zIndex: 1150,
+      overflowY: 'auto', padding: '16px 18px', fontFamily: '"Share Tech Mono", monospace' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color: '#f0f4ff' }}>[U] {id}</span>
+        <button onClick={onClose} style={{ background: 'none', border: '1px solid #1e2d4a', color: '#5a7090', width: 24, height: 24, cursor: 'pointer' }}>✕</button>
+      </div>
+      <div style={{ fontSize: 10, color: '#4a6a8a', letterSpacing: '0.1em' }}>ИСХОДЯЩИЙ ТРАФИК</div>
+      {Hdr('ТРАНСПОРТ')}
+      {Radio('transport', 'TCP', 'TCP — надёжно, с подтверждением')}
+      {Radio('transport', 'UDP', 'UDP — быстро, без подтверждения')}
+      {Hdr('ПРИКЛАДНОЙ')}
+      {Radio('application', 'HTTP', 'HTTP — порт 80', 'ТСПУ видит содержимое!')}
+      {Radio('application', 'HTTPS', 'HTTPS — порт 443', 'ТСПУ видит только SNI')}
+      {Radio('application', 'DNS', 'DNS — порт 53')}
+      {Radio('application', 'DoH', 'DoH — DNS over HTTPS', 'ТСПУ не видит DNS!')}
+      {Hdr('VPN ПРОТОКОЛ')}
+      {Radio('vpn', 'none', 'Нет VPN')}
+      {Radio('vpn', 'WireGuard', 'WireGuard', 'быстрый, легко блокируется')}
+      {Radio('vpn', 'VLESS', 'VLESS', 'маскируется под HTTPS')}
+      {Radio('vpn', 'Shadowsocks', 'Shadowsocks', 'обфускация трафика')}
+      {Hdr('НАЗНАЧЕНИЕ')}
+      {Radio('dest', 'ws-google', 'google.com')}
+      {Radio('dest', 'ws-news', 'news.com')}
+      {Radio('dest', 'ws-blocked', 'blocked.com ⚠ заблокирован')}
+      <div style={{ marginTop: 16 }}>
+        <SBtn label="Применить настройки" color="#00e676" onClick={() => onApply(c)} />
+      </div>
     </div>
   )
 }
