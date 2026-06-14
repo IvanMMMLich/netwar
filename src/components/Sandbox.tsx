@@ -91,6 +91,9 @@ export default function Sandbox() {
   const [drag, setDrag] = useState<DragState | null>(null)         // toolbar drag
   const [selected, setSelected] = useState<string | null>(null)   // node selected for edge creation
   const [mouse, setMouse] = useState<{ x: number; y: number } | null>(null) // for preview line
+  const [hoverNode, setHoverNode] = useState<string | null>(null) // node under cursor (for hint badge)
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null) // edge under cursor (violation highlight)
+  const [toast, setToast] = useState<{ msg: string; until: number } | null>(null)
   const [ctx, setCtx] = useState<CtxMenu | null>(null)
   const [editEdge, setEditEdge] = useState<string | null>(null)
   const [flash, setFlash] = useState(false)
@@ -211,22 +214,34 @@ export default function Sandbox() {
         return id                                  // select first
       }
       if (prevSel === id) return null              // deselect
-      // create edge prevSel → id
+      // create edge prevSel → id — validated via topologyRules
       const a = nodeById(prevSel), b = nodeById(id)
-      if (a && b && !edges.some(e => (e.source === a.id && e.target === b.id) || (e.source === b.id && e.target === a.id))) {
+      if (a && b) {
+        const dup = edges.some(e => (e.source === a.id && e.target === b.id) || (e.source === b.id && e.target === a.id))
+        if (dup) return null
+        const hint = getConnectionHint(a.type, b.type)
+        if (hint.level === 'error') {
+          setToast({ msg: `${hint.message} Добавь Router/Switch между ними.`, until: Date.now() + 3000 })
+          pushLog('Отменено — соединение запрещено')
+          return null   // do not create the edge
+        }
         const pr = sbEdgeParams(a.type, b.type)
         setEdges(prev => [...prev, { id: newId('e'), source: a.id, target: b.id, ...pr, born: performance.now() }])
-        pushLog(`✓ Ребро ${SB_BY_TYPE.get(a.type)!.full} → ${SB_BY_TYPE.get(b.type)!.full}`)
+        if (hint.level === 'warn') pushLog(`⚠ Ребро создано: ${hint.message}`)
+        else pushLog(`✓ Ребро ${SB_BY_TYPE.get(a.type)!.full} → ${SB_BY_TYPE.get(b.type)!.full}`)
       }
       return null
     })
   }, [nodeById, edges, pushLog])
 
+  // auto-clear error toast
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 3000); return () => clearTimeout(t) }, [toast])
+
   // Escape deselect
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setSelected(null); setCtx(null); setEditEdge(null) } }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (selected) pushLog('Отменено'); setSelected(null); setCtx(null); setEditEdge(null) } }
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [selected, pushLog])
 
   // ── context menu actions ──
   const deleteNode = useCallback((id: string) => {
@@ -481,12 +496,17 @@ export default function Sandbox() {
             const age = performance.now() - e.born
             const draw = Math.min(age / 300, 1)
             const flashing = age < 400   // red flash on freshly-created edges
+            const violates = getConnectionHint(a.type, b.type).level !== 'ok'
+            const hovered = hoverEdge === e.id
+            const stroke = flashing ? '#ff4444' : (hovered && violates) ? '#ffb300' : '#2a4a6a'
             return (
               <g key={e.id}>
                 <line x1={x1} y1={y1} x2={x1 + (x2 - x1) * draw} y2={y1 + (y2 - y1) * draw}
-                  stroke={flashing ? '#ff4444' : '#2a4a6a'} strokeWidth={sbBwWidth(e.bw)} markerEnd="url(#sbarrow)" />
+                  stroke={stroke} strokeWidth={sbBwWidth(e.bw)} markerEnd="url(#sbarrow)"
+                  strokeDasharray={hovered && violates ? '6 4' : undefined} />
                 <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={14}
                   style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setHoverEdge(e.id)} onMouseLeave={() => setHoverEdge(h => h === e.id ? null : h)}
                   onDoubleClick={ev => { ev.stopPropagation(); setEditEdge(e.id) }}
                   onContextMenu={ev => { ev.preventDefault(); ev.stopPropagation(); setCtx({ kind: 'edge', id: e.id, x: ev.clientX, y: ev.clientY }) }} />
               </g>
@@ -524,6 +544,8 @@ export default function Sandbox() {
           return (
             <div key={n.id}
               onMouseDown={onNodeMouseDown(n.id)}
+              onMouseEnter={() => setHoverNode(n.id)}
+              onMouseLeave={() => setHoverNode(h => h === n.id ? null : h)}
               onContextMenu={ev => { ev.preventDefault(); ev.stopPropagation(); setCtx({ kind: 'node', id: n.id, x: ev.clientX, y: ev.clientY }) }}
               style={{ position: 'absolute', left: n.x, top: n.y, width: SB_NODE_SIZE, height: SB_NODE_SIZE,
                 transform: 'translate(-50%,-50%)', animation: exploding ? 'sbfade .5s ease-in forwards'
@@ -733,6 +755,30 @@ export default function Sandbox() {
           onSave={(bw, lat, loss) => { setEdges(prev => prev.map(x => x.id === e.id ? { ...x, bw, latency: lat, loss } : x)); setEditEdge(null); pushLog('✓ Ребро обновлено') }}
           onDelete={() => deleteEdge(e.id)} onClose={() => setEditEdge(null)} />
       })()}
+
+      {/* connection hint badge (selected + hovering another node) */}
+      {selected && hoverNode && hoverNode !== selected && mouse && (() => {
+        const a = nodeById(selected), b = nodeById(hoverNode); if (!a || !b) return null
+        const hint = getConnectionHint(a.type, b.type)
+        const r = canvasRef.current?.getBoundingClientRect()
+        const col = hint.level === 'ok' ? '#00e676' : hint.level === 'warn' ? '#ffb300' : '#ff4444'
+        return (
+          <div style={{ position: 'fixed', left: (r?.left ?? 0) + mouse.x + 16, top: (r?.top ?? 0) + mouse.y + 16,
+            zIndex: 1250, pointerEvents: 'none', background: '#0d1424', border: `1.5px solid ${col}`,
+            color: col, fontFamily: '"Share Tech Mono", monospace', fontSize: 11, padding: '4px 10px', maxWidth: 240 }}>
+            {hint.message}
+          </div>
+        )
+      })()}
+
+      {/* error toast */}
+      {toast && Date.now() < toast.until && (
+        <div style={{ position: 'absolute', bottom: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 1250,
+          background: '#0d1424', border: '1.5px solid #ff4444', boxShadow: '0 0 14px #ff444444',
+          color: '#ff8888', fontFamily: '"Share Tech Mono", monospace', fontSize: 11, padding: '8px 16px', maxWidth: 420, textAlign: 'center' }}>
+          {toast.msg}
+        </div>
+      )}
 
       {/* toolbar drag preview */}
       {drag && (() => {
