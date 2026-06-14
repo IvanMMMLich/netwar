@@ -21,6 +21,7 @@ interface Packet {
   segElapsed: number   // ms elapsed within current segment
   bytes: number
   ttl: number
+  isResponse?: boolean // reverse-path response packet
 }
 
 interface Shard { x: number; y: number; vx: number; vy: number; start: number; color: string }
@@ -53,6 +54,15 @@ function routeLatencyMs(nodes: string[]): number {
 }
 
 function nowTs(): string { return new Date().toTimeString().slice(0, 8) }
+
+// blend a hex colour toward white (for response packets)
+function lightenColor(hex: string): string {
+  const n = parseInt(hex.slice(1), 16)
+  const r = Math.min(255, ((n >> 16) & 255) + 90)
+  const g = Math.min(255, ((n >> 8) & 255) + 90)
+  const b = Math.min(255, (n & 255) + 90)
+  return `rgb(${r},${g},${b})`
+}
 
 // ─── OSPF: Dijkstra over EDGES ───────────────────────────────────────────────────
 
@@ -285,7 +295,7 @@ function PktTooltip({ tip, cref, paused }: {
       padding: '12px 16px', pointerEvents: 'none' }}>
       <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color,
         marginBottom: 10, textShadow: `0 0 8px ${color}` }}>
-        {PKT_TITLE[pkt.kind]}
+        {pkt.isResponse ? `ОТВЕТ от ${NODE_MAP.get(pkt.nodes[0])?.sublabel ?? 'сервера'}` : PKT_TITLE[pkt.kind]}
       </div>
       <div style={{ borderTop: '1px solid #1e2d4a', marginBottom: 8 }} />
       <div style={{ ...mono, fontSize: 11, lineHeight: '1.9', display: 'flex', gap: 8 }}>
@@ -448,6 +458,8 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const shardsRef  = useRef<Shard[]>([])
   const incomeRef  = useRef<{ x: number; y: number; amt: number; start: number }[]>([])
   const incomeGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const rttGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const edgeRttRef = useRef<Map<string, number>>(new Map())
   const bouncesRef = useRef<Map<string, Bounce>>(new Map())
   const tspuFlashRef = useRef(0)
   const edgeUtilRef  = useRef<Map<string, number>>(new Map(EDGES.map(e => [e.id, 0])))
@@ -659,8 +671,14 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
     const pktGroup   = g.append('g'); pktGroupRef.current = pktGroup
     const shardGroup = g.append('g'); shardGroupRef.current = shardGroup
     const incomeGroup = g.append('g'); incomeGroupRef.current = incomeGroup
+    const rttGroup = g.append('g'); rttGroupRef.current = rttGroup
     function spawnIncome(id: string, amt: number) {
       const pp = pos(id); incomeRef.current.push({ x: pp.x, y: pp.y, amt, start: performance.now() })
+    }
+    function spawnResponse(p: Packet) {
+      if (packetsRef.current.length > MAX_PACKETS + 8) return
+      packetsRef.current.push({ id: nextIdRef.current++, kind: p.kind, nodes: [...p.nodes].reverse(),
+        seg: 0, segElapsed: 0, bytes: p.bytes, ttl: p.ttl, isResponse: true })
     }
 
     // ── OSPF weight labels (visible only in OSPF mode) ──
@@ -728,6 +746,14 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       .attr('x', -HALF - 5).attr('y', -HALF - 5).attr('width', NODE_SIZE + 10).attr('height', NODE_SIZE + 10)
       .attr('rx', 4).attr('fill', 'none').attr('stroke', 'transparent').attr('stroke-width', 2)
       .style('pointer-events', 'none')
+
+    // node-load indicator: background track + fill bar under the node
+    nodeSel.append('rect').attr('class', 'load-bg')
+      .attr('x', -HALF + 4).attr('y', HALF + 20).attr('width', NODE_SIZE - 8).attr('height', 3)
+      .attr('fill', '#1e2d4a').style('pointer-events', 'none')
+    nodeSel.append('rect').attr('class', 'load-fill')
+      .attr('x', -HALF + 4).attr('y', HALF + 20).attr('width', 0).attr('height', 3)
+      .attr('fill', '#00e676').style('pointer-events', 'none')
 
     nodeSel
       .on('click', (_e: MouseEvent, d) => {
@@ -854,21 +880,24 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         p.segElapsed += dt
         if (p.segElapsed < dur) { survivors.push(p); continue }
         // segment complete → arrive at b
+        if (segEdge) edgeRttRef.current.set(segEdge.id, now)   // mark RTT label
         p.seg++; p.segElapsed = 0
         const arrived = p.nodes[p.seg]
         if (p.kind === 'dns') bounce(arrived, 150, 0.15)
         if (p.seg >= p.nodes.length - 1) {
+          // response packet just got home — no counters, just remove
+          if (p.isResponse) continue
           // final arrival
           const stat = nodeStatsRef.current.get(arrived)!
           const srcLbl = NODE_MAP.get(p.nodes[0])?.label ?? p.nodes[0]
           const dstSub = NODE_MAP.get(arrived)?.sublabel ?? arrived
           const lat = routeLatencyMs(p.nodes)
-          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().earn(2); spawnIncome(arrived, 2)
-            setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 5)) }
-          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().earn(3); spawnIncome(arrived, 3)
-            setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 5)) }
+          if (p.kind === 'http')   { cDel++; stat.passed++; useStore.getState().earn(2); spawnIncome(arrived, 2); spawnResponse(p)
+            setHudEvents(prev => [{ ts: nowTs(), icon: '✓' as const, text: `${srcLbl} → ${dstSub} | TCP | ${lat}мс` }, ...prev].slice(0, 8)) }
+          if (p.kind === 'tunnel') { cVpn++; cDel++; stat.passed++; useStore.getState().earn(3); spawnIncome(arrived, 3); spawnResponse(p)
+            setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 8)) }
           if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().earn(1); spawnIncome(arrived, 1)
-            setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 5)) }
+            setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 8)) }
           if (p.kind === 'blocked') {
             // reached ТСПУ → shatter
             cBlk++; stat.blocked++
@@ -878,7 +907,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             setLog(prev => [`✕ BLOCKED: ${uType}→blocked.com | SNI detected`, ...prev].slice(0, 3))
             counterRef.current.blocked++
             onTspuBlocked(counterRef.current.blocked)
-            setHudEvents(prev => [{ ts: nowTs(), icon: '✕' as const, text: `${srcLbl} → blocked.com | BLOCKED ТСПУ` }, ...prev].slice(0, 5))
+            setHudEvents(prev => [{ ts: nowTs(), icon: '✕' as const, text: `${srcLbl} → blocked.com | BLOCKED ТСПУ` }, ...prev].slice(0, 8))
           }
           continue // remove
         }
@@ -930,6 +959,36 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           if (age >= 300) tspuFlashRef.current = 0
           nodeSelRef.current.select('.tspu-flash').attr('opacity', op)
         }
+        // node-load bars (throttled): load = packets on incident edges
+        if (frame % 4 === 0) {
+          const nodeLoad = new Map<string, number>()
+          for (const e of EDGES) {
+            const l = edgeLoad.get(e.id) ?? 0
+            if (l) { nodeLoad.set(e.source, (nodeLoad.get(e.source) ?? 0) + l); nodeLoad.set(e.target, (nodeLoad.get(e.target) ?? 0) + l) }
+          }
+          const W = NODE_SIZE - 8
+          nodeSelRef.current.select('.load-fill')
+            .attr('width', (d: NetNode) => Math.min(1, (nodeLoad.get(d.id) ?? 0) / 4) * W)
+            .attr('fill', (d: NetNode) => { const f = (nodeLoad.get(d.id) ?? 0) / 4; return f > 0.8 ? '#ff4444' : f > 0.5 ? '#ffb300' : '#00e676' })
+        }
+      }
+
+      // ── RTT labels: show RTT briefly after a packet traverses an edge ──
+      if (rttGroupRef.current && frame % 4 === 0) {
+        const active: { id: string; x: number; y: number; rtt: number }[] = []
+        for (const e of EDGES) {
+          const ts = edgeRttRef.current.get(e.id)
+          if (ts && now - ts < 1500) {
+            const s = pos(e.source), t = pos(e.target)
+            active.push({ id: e.id, x: (s.x + t.x) / 2, y: (s.y + t.y) / 2 - 8, rtt: Math.round(e.props.latency * 2) })
+          }
+        }
+        rttGroupRef.current.selectAll<SVGTextElement, { id: string; x: number; y: number; rtt: number }>('text')
+          .data(active, d => d.id)
+          .join('text')
+          .attr('text-anchor', 'middle').attr('font-family', '"Share Tech Mono", monospace').attr('font-size', '9px')
+          .attr('fill', '#5a7090').attr('x', d => d.x).attr('y', d => d.y)
+          .text(d => `${d.rtt}мс`)
       }
 
       // ── Render packets ──
@@ -961,9 +1020,11 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             const x = pa.x + (pb.x - pa.x) * t
             const y = pa.y + (pb.y - pa.y) * t
             const tunneled = d.kind === 'tunnel' && isTunnelSegment(a, b)
-            const color = tunneled ? '#9c6bff' : PKT_COLOR[d.kind]
-            // 6px live, 8px on pause + pulsing outline for easier hover
-            const size = frozen ? 8 : 6
+            const baseColor = tunneled ? '#9c6bff' : PKT_COLOR[d.kind]
+            // response packets are lighter and smaller (4px vs 6px)
+            const color = d.isResponse ? lightenColor(baseColor) : baseColor
+            // 6px live, 8px on pause + pulsing outline; responses 4px
+            const size = d.isResponse ? (frozen ? 6 : 4) : (frozen ? 8 : 6)
             const pulse = frozen ? (Math.sin(now / 300) * 0.5 + 0.5) : 0
             const el = d3.select(this)
             el.select('.pkt-body')
