@@ -462,6 +462,12 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
   const edgeRttRef = useRef<Map<string, number>>(new Map())
   const bouncesRef = useRef<Map<string, Bounce>>(new Map())
   const tspuFlashRef = useRef(0)
+  // ── ТСПУ blocking mode (point 6) ──
+  const tspuModeRef = useRef<'SNI' | 'IP' | 'DNS' | 'HTTP' | 'OFF'>('SNI')
+  const tspuStatsRef = useRef({ blocked: 0, passed: 0, bypass: 0 })
+  const [tspuMode, setTspuMode] = useState<'SNI' | 'IP' | 'DNS' | 'HTTP' | 'OFF'>('SNI')
+  const [tspuMenu, setTspuMenu] = useState<{ x: number; y: number } | null>(null)
+  const [tspuStats, setTspuStats] = useState({ blocked: 0, passed: 0, bypass: 0 })
   const edgeUtilRef  = useRef<Map<string, number>>(new Map(EDGES.map(e => [e.id, 0])))
   const nodeStatsRef = useRef<Map<string, { passed: number; blocked: number }>>(
     new Map(NODES.map(n => [n.id, { passed: 0, blocked: 0 }]))
@@ -722,6 +728,12 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       .attr('x', -HALF).attr('y', -HALF).attr('width', NODE_SIZE).attr('height', NODE_SIZE)
       .attr('rx', 3).attr('fill', '#ff4444').attr('opacity', 0).style('pointer-events', 'none')
 
+    // ТСПУ mode label under the node (point 6)
+    nodeSel.filter(d => d.type === 'ТСПУ').append('text').attr('class', 'tspu-mode')
+      .attr('text-anchor', 'middle').attr('y', HALF + 30)
+      .attr('font-family', '"Share Tech Mono", monospace').attr('font-size', '9px')
+      .attr('fill', '#ff4444').style('pointer-events', 'none').text('SNI')
+
     // BLOCKED tag
     nodeSel.filter(d => !!d.blocked).append('text')
       .text('BLOCKED').attr('text-anchor', 'middle').attr('y', -HALF - 8)
@@ -756,6 +768,12 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       .attr('fill', '#00e676').style('pointer-events', 'none')
 
     nodeSel
+      .on('contextmenu', (event: MouseEvent, d) => {
+        if (d.type !== 'ТСПУ') return
+        event.preventDefault()
+        const r = cref.current!.getBoundingClientRect()
+        setTspuMenu({ x: event.clientX - r.left, y: event.clientY - r.top })
+      })
       .on('click', (_e: MouseEvent, d) => {
         if (ospfActiveRef.current) {
           // OSPF mode: pick SOURCE then DESTINATION
@@ -884,6 +902,29 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         p.seg++; p.segElapsed = 0
         const arrived = p.nodes[p.seg]
         if (p.kind === 'dns') bounce(arrived, 150, 0.15)
+        // ── ТСПУ mode-based interception (point 6) ──
+        if (!p.isResponse && NODE_TYPE_MAP.get(arrived) === 'ТСПУ') {
+          const m = tspuModeRef.current
+          if (p.kind === 'tunnel') { tspuStatsRef.current.bypass++ }  // VPN bypasses any mode
+          else {
+            const blockedByMode =
+              m === 'OFF'  ? false :
+              m === 'HTTP' ? p.kind === 'http' :
+              m === 'DNS'  ? p.kind === 'dns'  :
+              /* SNI or IP */ p.kind === 'blocked'
+            if (blockedByMode) {
+              tspuStatsRef.current.blocked++; cBlk++
+              spawnShards(arrived); tspuFlashRef.current = now
+              const reason = m === 'IP' ? 'блокировка по IP dst' : m === 'SNI' ? 'SNI=blocked.com' : m === 'HTTP' ? 'HTTP порт 80' : 'DNS подмена'
+              setLog(prev => [`✕ ТСПУ[${m}]: ${reason} — BLOCK`, ...prev].slice(0, 3))
+              counterRef.current.blocked++; onTspuBlocked(counterRef.current.blocked)
+              setTspuStats({ ...tspuStatsRef.current })
+              continue  // drop the packet
+            } else {
+              tspuStatsRef.current.passed++
+            }
+          }
+        }
         if (p.seg >= p.nodes.length - 1) {
           // response packet just got home — no counters, just remove
           if (p.isResponse) continue
@@ -898,17 +939,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             setHudEvents(prev => [{ ts: nowTs(), icon: '⚡' as const, text: `${srcLbl} → blocked.com | VPN туннель | ${lat}мс` }, ...prev].slice(0, 8)) }
           if (p.kind === 'dns')    { cDns++; stat.passed++; useStore.getState().scorePacket('dns'); spawnIncome(arrived, PKT_INCOME.dns)
             setHudEvents(prev => [{ ts: nowTs(), icon: '◎' as const, text: 'DNS: google.com → 142.250.1.1' }, ...prev].slice(0, 8)) }
-          if (p.kind === 'blocked') {
-            // reached ТСПУ → shatter
-            cBlk++; stat.blocked++
-            spawnShards(arrived)
-            tspuFlashRef.current = now
-            const uType = NODE_TYPE_MAP.get(p.nodes[0]) ?? p.nodes[0]
-            setLog(prev => [`✕ BLOCKED: ${uType}→blocked.com | SNI detected`, ...prev].slice(0, 3))
-            counterRef.current.blocked++
-            onTspuBlocked(counterRef.current.blocked)
-            setHudEvents(prev => [{ ts: nowTs(), icon: '✕' as const, text: `${srcLbl} → blocked.com | BLOCKED ТСПУ` }, ...prev].slice(0, 8))
-          }
+          // 'blocked' packets are fully handled by the ТСПУ mode interception above
           continue // remove
         }
         survivors.push(p)
@@ -920,7 +951,7 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
         counterRef.current.dns       += cDns
         counterRef.current.vpn       += cVpn
         setCounters({ ...counterRef.current })
-        if (frame % 6 === 0) { onNodeStats(new Map(nodeStatsRef.current)); setStatsState(new Map(nodeStatsRef.current)) }
+        if (frame % 6 === 0) { onNodeStats(new Map(nodeStatsRef.current)); setStatsState(new Map(nodeStatsRef.current)); setTspuStats({ ...tspuStatsRef.current }) }
       }
 
       // ── Utilization smoothing + edge colour ──
@@ -1128,6 +1159,16 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       d.id === selectedNodeId ? NODE_COLOR[d.type] : 'transparent')
   }, [selectedNodeId, ospfActive])
 
+  // ── ТСПУ mode label + frame colour ──
+  useEffect(() => {
+    tspuModeRef.current = tspuMode
+    if (!nodeSelRef.current) return
+    const off = tspuMode === 'OFF'
+    nodeSelRef.current.select('.tspu-mode').text(tspuMode).attr('fill', off ? '#5a7090' : '#ff4444')
+    nodeSelRef.current.filter((d: NetNode) => d.type === 'ТСПУ').select('.node-body')
+      .attr('stroke', off ? '#5a7090' : '#ff4444')
+  }, [tspuMode])
+
   // ── OSPF mode reactivity: weight visibility, edge styling, rings ──
   useEffect(() => {
     if (wgtGroupRef.current) {
@@ -1148,7 +1189,54 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
       {editingEdge && <WeightEditor edge={editingEdge} onCommit={commitWeight} onCancel={() => setEditingEdge(null)} />}
       <EventLog entries={log} />
       <Counters c={counters} events={hudEvents} />
+      {tspuMenu && (
+        <TspuMenu x={tspuMenu.x} y={tspuMenu.y} mode={tspuMode} stats={tspuStats}
+          onPick={m => { setTspuMode(m); setTspuMenu(null); setLog(prev => [`ТСПУ: режим ${m === 'OFF' ? 'мониторинга (без блокировки)' : m}`, ...prev].slice(0, 3)) }}
+          onClose={() => setTspuMenu(null)} />
+      )}
       <ControlBar zoom={zoomLevel} onZoom={applyZoom} onFit={() => fitToView(true)} onToggleOspf={toggleOspf} ospfActive={ospfActive} />
     </div>
+  )
+}
+
+function TspuMenu({ x, y, mode, stats, onPick, onClose }: {
+  x: number; y: number; mode: string; stats: { blocked: number; passed: number; bypass: number }
+  onPick: (m: 'SNI' | 'IP' | 'DNS' | 'HTTP' | 'OFF') => void; onClose: () => void
+}) {
+  const total = stats.blocked + stats.passed
+  const eff = total ? Math.round((stats.blocked / total) * 100) : 0
+  const modes: { k: 'SNI' | 'IP' | 'DNS' | 'HTTP' | 'OFF'; label: string }[] = [
+    { k: 'IP',   label: 'По IP (10.0.0.3)' },
+    { k: 'SNI',  label: 'По SNI (blocked.com)' },
+    { k: 'DNS',  label: 'По DNS (подмена)' },
+    { k: 'HTTP', label: 'По порту 80 (HTTP)' },
+    { k: 'OFF',  label: 'Разрешить всё (мониторинг)' },
+  ]
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 290 }} />
+      <div style={{ position: 'absolute', left: x, top: y, zIndex: 300, width: 230,
+        background: '#0d1424', border: '1.5px solid #ff4444', boxShadow: '0 0 16px #ff444444',
+        fontFamily: '"Share Tech Mono", monospace', padding: '8px 0' }}>
+        <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 8, color: '#ff4444', padding: '0 12px 8px' }}>
+          РЕЖИМ ТСПУ
+        </div>
+        {modes.map(m => (
+          <div key={m.k} onClick={() => onPick(m.k)}
+            style={{ padding: '6px 12px', cursor: 'pointer', fontSize: 11,
+              color: mode === m.k ? '#00e676' : '#c8d8f0', background: mode === m.k ? '#00e67615' : 'transparent' }}
+            onMouseEnter={e => (e.currentTarget.style.background = '#1e2d4a')}
+            onMouseLeave={e => (e.currentTarget.style.background = mode === m.k ? '#00e67615' : 'transparent')}>
+            {mode === m.k ? '● ' : '○ '}{m.label}
+          </div>
+        ))}
+        <div style={{ borderTop: '1px solid #1e2d4a', margin: '6px 0', padding: '6px 12px 0', fontSize: 10, color: '#5a7090', lineHeight: 1.7 }}>
+          Заблокировано: <span style={{ color: '#ff4444' }}>{stats.blocked}</span><br />
+          Пропущено: <span style={{ color: '#00e676' }}>{stats.passed}</span><br />
+          Эффективность: <span style={{ color: '#ffb300' }}>{eff}%</span><br />
+          Обходов VPN: <span style={{ color: '#9c6bff' }}>{stats.bypass}</span>
+        </div>
+      </div>
+    </>
   )
 }
