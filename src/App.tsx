@@ -2,6 +2,8 @@ import React, { useState, useCallback } from 'react'
 import NetworkGraph from './NetworkGraph'
 import NodePanel from './components/NodePanel'
 import ScenarioPanel from './components/ScenarioPanel'
+import ModeSwitcher from './components/ModeSwitcher'
+import Sandbox from './components/Sandbox'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -18,24 +20,33 @@ export default function App() {
   const handleNodeStats = useCallback((s: Map<string, { passed: number; blocked: number }>) => setNodeStats(s), [])
   const handleTspu = useCallback((n: number) => setTspuBlocked(n), [])
   const panelOpen = useStore(s => s.selectedNodeId !== null)
+  const mode = useStore(s => s.mode)
+  const isTopology = mode === 'topology'
 
   return (
     <div className="scanlines relative min-h-screen w-full bg-bg overflow-hidden">
+      {/* TOPOLOGY — kept mounted so its state persists when hidden */}
       <div className="absolute inset-0"
-        style={{ right: panelOpen ? PANEL_WIDTH : 0, transition: 'right 0.25s ease' }}>
+        style={{ display: isTopology ? 'block' : 'none',
+                 right: panelOpen && isTopology ? PANEL_WIDTH : 0, transition: 'right 0.25s ease' }}>
         <NetworkGraph onNodeStats={handleNodeStats} onTspuBlocked={handleTspu} />
       </div>
+
+      {/* SANDBOX */}
+      {!isTopology && <Sandbox />}
+
+      <ModeSwitcher />
 
       <div style={{ ...HUD, top: 16, left: 16, color: '#00e676',
         textShadow: '0 0 8px #00e676, 0 0 16px #00e67666' }}>
         SYS::NETWAR v0.4.0
       </div>
-      <div style={{ ...HUD, top: 16, right: panelOpen ? PANEL_WIDTH + 16 : 16, color: '#00b4ff',
+      <div style={{ ...HUD, top: 16, right: panelOpen && isTopology ? PANEL_WIDTH + 16 : 16, color: '#00b4ff',
         textShadow: '0 0 8px #00b4ff, 0 0 16px #00b4ff66', transition: 'right 0.25s ease' }}>
         STATUS::ONLINE
       </div>
 
-      <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />
+      {isTopology && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
       <ScenarioPanel />
     </div>
   )

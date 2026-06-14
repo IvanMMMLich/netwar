@@ -8,6 +8,7 @@ export interface Protocols {
 }
 
 interface NetWarStore {
+  mode:                'topology' | 'sandbox'
   paused:              boolean
   speed:               number
   speedIdx:            number
@@ -20,6 +21,7 @@ interface NetWarStore {
   ospfSrcId:           string | null
   ospfDstId:           string | null
 
+  setMode:               (m: 'topology' | 'sandbox') => void
   setPaused:             (v: boolean) => void
   cycleSpeed:            () => void
   setOspfActive:         (v: boolean) => void
@@ -37,6 +39,7 @@ interface NetWarStore {
 const SPEEDS = [0.5, 1, 1.5, 2]
 
 export const useStore = create<NetWarStore>((set, get) => ({
+  mode:               'topology',
   paused:             false,
   speed:              1,
   speedIdx:           1,
@@ -49,6 +52,7 @@ export const useStore = create<NetWarStore>((set, get) => ({
   ospfSrcId:  null,
   ospfDstId:  null,
 
+  setMode:     m  => set({ mode: m }),
   setPaused:   v  => set({ paused: v }),
   cycleSpeed:  ()  => set(s => {
     const idx = (s.speedIdx + 1) % SPEEDS.length
