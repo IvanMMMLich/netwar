@@ -246,6 +246,14 @@ export default function Sandbox() {
     return () => clearInterval(iv)
   }, [effects.length])
 
+  // brief animation ticker so SVG edge draw/flash animates after add/remove
+  useEffect(() => {
+    let raf = 0; const start = performance.now()
+    const t = () => { setTick(v => v + 1); if (performance.now() - start < 600) raf = requestAnimationFrame(t) }
+    raf = requestAnimationFrame(t)
+    return () => cancelAnimationFrame(raf)
+  }, [nodes.length, edges.length])
+
   // keep refs in sync for the sim loop
   useEffect(() => { nodesRef.current = nodes }, [nodes])
   useEffect(() => { edgesRef.current = edges }, [edges])
@@ -390,9 +398,45 @@ export default function Sandbox() {
     }
   }, [nodes, edges, running, mission, missionIntro, missionsDone]) // eslint-disable-line
 
+  // Smart ТСПУ injection: splice ТСПУ onto an edge of the User→WebServer path.
   const addTspuForMission2 = useCallback(() => {
-    setNodes(prev => [...prev, { id: newId('ТСПУ'), type: 'ТСПУ', x: 600, y: 200, pinned: false, born: performance.now() }])
-    pushLog('⚠ ТСПУ внедрён в сеть — нужен VPN для обхода')
+    setNodes(curNodes => {
+      const user = curNodes.find(n => n.type === 'User')
+      const ws = curNodes.find(n => n.type === 'WebServer')
+      if (!user || !ws) {
+        pushLog('⚠ ТСПУ не внедрён — нет маршрута User→WebServer')
+        return curNodes
+      }
+      let injected = false
+      setEdges(curEdges => {
+        const path = findPath(curNodes, curEdges, user.id, ws.id)
+        if (!path) { pushLog('⚠ ТСПУ не внедрён — нет пути'); return curEdges }
+        // pick the edge on the path, preferring Router→Firewall, else last hop before WS
+        const typeOf = (id: string) => curNodes.find(n => n.id === id)?.type
+        let cut = -1
+        for (let i = 0; i < path.length - 1; i++) {
+          const a = typeOf(path[i]), b = typeOf(path[i + 1])
+          if ((a === 'Router' && b === 'Firewall') || (a === 'Firewall' && b === 'Router')) { cut = i; break }
+        }
+        if (cut < 0) cut = Math.max(0, path.length - 2)   // fallback: hop before WS
+        const aId = path[cut], bId = path[cut + 1]
+        const a = curNodes.find(n => n.id === aId)!, b = curNodes.find(n => n.id === bId)!
+        const tspuId = newId('ТСПУ')
+        const tx = (a.x + b.x) / 2, ty = (a.y + b.y) / 2
+        // add ТСПУ node at the midpoint
+        setNodes(ns => [...ns, { id: tspuId, type: 'ТСПУ', x: tx, y: ty, pinned: false, born: performance.now() }])
+        injected = true
+        pushLog(`⚠ ТСПУ внедрён между ${SB_BY_TYPE.get(a.type)!.full} и ${SB_BY_TYPE.get(b.type)!.full}`)
+        const now = performance.now()
+        // remove the cut edge, add aId→ТСПУ and ТСПУ→bId
+        const kept = curEdges.filter(e => !((e.source === aId && e.target === bId) || (e.source === bId && e.target === aId)))
+        const p1 = sbEdgeParams(a.type, 'ТСПУ'), p2 = sbEdgeParams('ТСПУ', b.type)
+        return [...kept,
+          { id: newId('e'), source: aId, target: tspuId, ...p1, born: now },
+          { id: newId('e'), source: tspuId, target: bId, ...p2, born: now }]
+      })
+      return curNodes
+    })
   }, [pushLog])
 
   const startMission = useCallback(() => {
@@ -434,11 +478,13 @@ export default function Sandbox() {
             const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1
             const ux = dx / len, uy = dy / len, trim = SB_NODE_SIZE / 2 + 6
             const x1 = a.x + ux * trim, y1 = a.y + uy * trim, x2 = b.x - ux * trim, y2 = b.y - uy * trim
-            const draw = Math.min((performance.now() - e.born) / 300, 1)
+            const age = performance.now() - e.born
+            const draw = Math.min(age / 300, 1)
+            const flashing = age < 400   // red flash on freshly-created edges
             return (
               <g key={e.id}>
                 <line x1={x1} y1={y1} x2={x1 + (x2 - x1) * draw} y2={y1 + (y2 - y1) * draw}
-                  stroke="#2a4a6a" strokeWidth={sbBwWidth(e.bw)} markerEnd="url(#sbarrow)" />
+                  stroke={flashing ? '#ff4444' : '#2a4a6a'} strokeWidth={sbBwWidth(e.bw)} markerEnd="url(#sbarrow)" />
                 <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={14}
                   style={{ cursor: 'pointer' }}
                   onDoubleClick={ev => { ev.stopPropagation(); setEditEdge(e.id) }}
@@ -480,7 +526,8 @@ export default function Sandbox() {
               onMouseDown={onNodeMouseDown(n.id)}
               onContextMenu={ev => { ev.preventDefault(); ev.stopPropagation(); setCtx({ kind: 'node', id: n.id, x: ev.clientX, y: ev.clientY }) }}
               style={{ position: 'absolute', left: n.x, top: n.y, width: SB_NODE_SIZE, height: SB_NODE_SIZE,
-                transform: 'translate(-50%,-50%)', animation: exploding ? 'sbfade .5s ease-in forwards' : (performance.now() - n.born < 250 ? 'sbpop .2s ease-out' : 'none'),
+                transform: 'translate(-50%,-50%)', animation: exploding ? 'sbfade .5s ease-in forwards'
+                  : (performance.now() - n.born < 450 ? (n.type === 'ТСПУ' ? 'sbinject .4s ease-out' : 'sbpop .2s ease-out') : 'none'),
                 border: `2px solid ${isSel ? '#00e676' : item.color}`, borderRadius: 3, background: `${item.color}1a`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: n.pinned ? 'default' : 'grab',
                 fontFamily: '"Press Start 2P", cursive', fontSize: item.label.length > 2 ? 8 : 14, color: item.color,
