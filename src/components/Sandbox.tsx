@@ -4,6 +4,10 @@ import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
   sbEdgeParams, sbBwWidth, sbBwLabel,
 } from '../data/sandbox'
+import {
+  buildAdj, bfsToType, findPath, validateTopology, getConnectionHint,
+  isTspuOnPath, isVpnBypassingTspu, ValidationResult,
+} from '../data/topologyRules'
 
 const TOOLBAR_W = 80
 
@@ -34,61 +38,6 @@ function pktColor(cfg: UserCfg): string {
 
 export interface SbPacket { id: number; path: string[]; seg: number; elapsed: number; blocked: boolean; color: string; cfg: UserCfg }
 let sbPktId = 0
-
-// adjacency (undirected) from edges
-function buildAdj(nodes: SbNode[], edges: SbEdge[]): Map<string, string[]> {
-  const adj = new Map<string, string[]>(nodes.map(n => [n.id, []]))
-  for (const e of edges) { adj.get(e.source)?.push(e.target); adj.get(e.target)?.push(e.source) }
-  return adj
-}
-
-// BFS shortest path (by hops) from src to first node satisfying pred
-function bfsTo(adj: Map<string, string[]>, src: string, pred: (id: string) => boolean): string[] | null {
-  const prev = new Map<string, string>(); const seen = new Set([src]); const q = [src]
-  while (q.length) {
-    const u = q.shift()!
-    if (u !== src && pred(u)) { const path = [u]; let c = u; while (prev.has(c)) { c = prev.get(c)!; path.unshift(c) } return path }
-    for (const v of adj.get(u) ?? []) if (!seen.has(v)) { seen.add(v); prev.set(v, u); q.push(v) }
-  }
-  return null
-}
-
-export interface CheckResult { ok: boolean; lines: { icon: string; text: string; color: string }[]; advice: string }
-
-function validateTopology(nodes: SbNode[], edges: SbEdge[]): CheckResult {
-  const adj = buildAdj(nodes, edges)
-  const users = nodes.filter(n => n.type === 'User')
-  const servers = nodes.filter(n => n.type === 'WebServer')
-  const dns = nodes.filter(n => n.type === 'DNS')
-  const tspu = nodes.filter(n => n.type === 'ТСПУ')
-  const vpn = nodes.filter(n => n.type === 'VPN')
-  const L: CheckResult['lines'] = []
-  const G = '#00e676', R = '#ff4444', A = '#ff8c00'
-  let ok = true
-  L.push(users.length ? { icon: '✓', text: `User найден (${users.length} шт.)`, color: G } : (ok = false, { icon: '✗', text: 'Нет ни одного User!', color: R }))
-  L.push(servers.length ? { icon: '✓', text: `WebServer найден (${servers.length} шт.)`, color: G } : (ok = false, { icon: '✗', text: 'Нет WebServer!', color: R }))
-  // path
-  let pathFound = false; let pathViaTspu = false
-  for (const u of users) { const path = bfsTo(adj, u.id, id => nodes.find(n => n.id === id)?.type === 'WebServer'); if (path) { pathFound = true; if (path.some(id => nodes.find(n => n.id === id)?.type === 'ТСПУ')) pathViaTspu = true } }
-  L.push(pathFound ? { icon: '✓', text: 'Путь до WebServer существует', color: G } : (ok = false, { icon: '✗', text: 'Нет пути User → WebServer', color: R }))
-  // isolated
-  const connected = new Set<string>(); if (nodes.length) { const st = [nodes[0].id]; connected.add(nodes[0].id); while (st.length) { const u = st.pop()!; for (const v of adj.get(u) ?? []) if (!connected.has(v)) { connected.add(v); st.push(v) } } }
-  const isolated = nodes.filter(n => !connected.has(n.id))
-  L.push(isolated.length === 0 ? { icon: '✓', text: 'Изолированных узлов нет', color: G } : { icon: '⚠', text: `Изолированных узлов: ${isolated.length}`, color: A })
-  if (pathViaTspu) {
-    const bypass = vpn.length > 0
-    L.push({ icon: '⚠', text: 'ТСПУ на пути блокирует трафик', color: A })
-    L.push(bypass ? { icon: '✓', text: 'VPN обходит ТСПУ', color: G } : { icon: '✗', text: 'VPN не настроен для обхода ТСПУ', color: R })
-  }
-  if (dns.length === 0) L.push({ icon: '✗', text: 'DNS сервер не настроен!', color: R })
-  const advice = !servers.length ? 'Добавь WebServer как цель трафика'
-    : !pathFound ? 'Соедини User с WebServer через Switch/Router'
-    : isolated.length ? 'Подключи изолированные узлы рёбрами'
-    : pathViaTspu && !vpn.length ? 'Добавь VPN параллельно ТСПУ для обхода'
-    : dns.length === 0 ? 'Добавь DNS сервер между User и Router'
-    : 'Топология готова — нажми RUN'
-  return { ok, lines: L, advice }
-}
 
 interface SaveSlot { name: string; ts: number; nodes: SbNode[]; edges: SbEdge[]; bits: number }
 const SLOT_KEY = (n: number) => `netwar_sandbox_save_${n}`
@@ -149,7 +98,7 @@ export default function Sandbox() {
   const [running, setRunning] = useState(false)
   const [tick, setTick] = useState(0)
   const [confirmClear, setConfirmClear] = useState(false)
-  const [check, setCheck] = useState<CheckResult | null>(null)
+  const [check, setCheck] = useState<ValidationResult | null>(null)
   const [loadOpen, setLoadOpen] = useState(false)
   const [exploding, setExploding] = useState(false)
   const [shopOpen, setShopOpen] = useState(false)
@@ -303,9 +252,8 @@ export default function Sandbox() {
 
   // ── RUN / STOP ──
   const startRun = useCallback(() => {
-    const adj = buildAdj(nodes, edges)
     const users = nodes.filter(n => n.type === 'User')
-    const anyPath = users.some(u => bfsTo(adj, u.id, id => nodes.find(n => n.id === id)?.type === 'WebServer'))
+    const anyPath = users.some(u => bfsToType(nodes, edges, u.id, 'WebServer'))
     if (!anyPath) { pushLog('⚠ ОШИБКА: нет маршрута от User до WebServer'); return }
     runRef.current = true; setRunning(true); wgStart.current = performance.now(); logThrottle.current.clear(); pushLog('▶ Симуляция запущена')
   }, [nodes, edges, pushLog])
@@ -325,14 +273,12 @@ export default function Sandbox() {
       const dt = lastFrame.current ? now - lastFrame.current : 16; lastFrame.current = now
       if (runRef.current) {
         const ns = nodesRef.current, es = edgesRef.current
-        const adj = buildAdj(ns, es)
         const users = ns.filter(n => n.type === 'User')
         const hasVpn = ns.some(n => n.type === 'VPN')
         if (now - lastSpawn.current > 700 && pktRef.current.length < 20 && users.length) {
           const u = users[Math.floor(Math.random() * users.length)]
-          const target = Math.random() < 0.7 ? 'WebServer' : 'DNS'
-          const path = bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === target)
-            ?? bfsTo(adj, u.id, id => ns.find(n => n.id === id)?.type === 'WebServer')
+          const target: SbType = Math.random() < 0.7 ? 'WebServer' : 'DNS'
+          const path = bfsToType(ns, es, u.id, target) ?? bfsToType(ns, es, u.id, 'WebServer')
           if (path && path.length > 1) {
             const cfg = userCfgRef.current[u.id] ?? DEFAULT_CFG
             pktRef.current.push({ id: sbPktId++, path, seg: 0, elapsed: 0, blocked: false, color: pktColor(cfg), cfg })
@@ -674,12 +620,16 @@ export default function Sandbox() {
       {check && (
         <Modal onClose={() => setCheck(null)}>
           <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 9, color: '#00b4ff', marginBottom: 12 }}>ПРОВЕРКА ТОПОЛОГИИ</div>
-          {check.lines.map((l, i) => (
-            <div key={i} style={{ fontSize: 11, color: l.color, lineHeight: 1.8 }}>{l.icon} {l.text}</div>
-          ))}
-          <div style={{ fontSize: 11, color: '#ffb300', marginTop: 12, lineHeight: 1.6, borderLeft: '2px solid #ffb300', paddingLeft: 8 }}>
-            РЕКОМЕНДАЦИЯ: {check.advice}
-          </div>
+          {check.errors.length === 0 && check.warnings.length === 0 && (
+            <div style={{ fontSize: 11, color: '#00e676', lineHeight: 1.8 }}>✓ Ошибок не найдено</div>
+          )}
+          {check.errors.map((l, i) => <div key={`e${i}`} style={{ fontSize: 11, color: '#ff4444', lineHeight: 1.8 }}>{l}</div>)}
+          {check.warnings.map((l, i) => <div key={`w${i}`} style={{ fontSize: 11, color: '#ff8c00', lineHeight: 1.8 }}>{l}</div>)}
+          {check.tips.length > 0 && (
+            <div style={{ marginTop: 12, borderLeft: '2px solid #ffb300', paddingLeft: 8 }}>
+              {check.tips.map((t, i) => <div key={`t${i}`} style={{ fontSize: 11, color: '#ffb300', lineHeight: 1.6 }}>💡 {t}</div>)}
+            </div>
+          )}
           <div style={{ marginTop: 14 }}><SBtn label="Закрыть" color="#5a7090" onClick={() => setCheck(null)} /></div>
         </Modal>
       )}
