@@ -5,6 +5,7 @@ import ScenarioPanel from './components/ScenarioPanel'
 import ModeSwitcher from './components/ModeSwitcher'
 import Sandbox from './components/Sandbox'
 import EconomyHUD from './components/EconomyHUD'
+import EventSystem from './components/EventSystem'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -50,6 +51,7 @@ export default function App() {
       </div>
 
       <EconomyHUD />
+      {isTopology && <EventSystem />}
 
       {isTopology && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
       <ScenarioPanel />
