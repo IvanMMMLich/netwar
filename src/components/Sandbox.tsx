@@ -156,6 +156,11 @@ export default function Sandbox() {
   const [effects, setEffects] = useState<{ name: string; until: number; dur: number }[]>([])
   const [userCfg, setUserCfg] = useState<Record<string, UserCfg>>({})
   const [userPanel, setUserPanel] = useState<string | null>(null)
+  const [mission, setMission] = useState<number | null>(null)
+  const [missionIntro, setMissionIntro] = useState(false)
+  const [missionsDone, setMissionsDone] = useState<number[]>(() => {
+    try { return JSON.parse(localStorage.getItem('netwar_missions') ?? '[]') } catch { return [] }
+  })
   const userCfgRef = useRef<Record<string, UserCfg>>({})
   useEffect(() => { userCfgRef.current = userCfg }, [userCfg])
   const wgStart = useRef<number>(0)  // WireGuard detection timer
@@ -392,6 +397,63 @@ export default function Sandbox() {
     setLoadOpen(false)
   }, [pushLog])
 
+  // ── tutorial missions (block 8) ──
+  const earn = useStore(s => s.earn)
+  useEffect(() => {
+    if (!localStorage.getItem('netwar_tutorial_seen')) { setMission(1); setMissionIntro(true) }
+  }, [])
+
+  const has = useCallback((t: SbType, n = 1) => counts(t) >= n, [counts])
+  const missionSteps = useCallback((m: number): { label: string; done: boolean }[] => {
+    if (m === 1) return [
+      { label: 'Добавь User', done: has('User') },
+      { label: 'Добавь Switch (50⬡)', done: has('Switch') },
+      { label: 'Добавь Router (150⬡)', done: has('Router') },
+      { label: 'Добавь Firewall (200⬡)', done: has('Firewall') },
+      { label: 'Добавь WebServer (200⬡)', done: has('WebServer') },
+      { label: 'Соедини их рёбрами (≥4)', done: edges.length >= 4 },
+      { label: 'Нажми RUN', done: running },
+    ]
+    if (m === 2) return [
+      { label: 'ТСПУ добавлен между сетью', done: has('ТСПУ') },
+      { label: 'Добавь VPN параллельно ТСПУ (300⬡+1◈)', done: has('VPN') },
+      { label: 'Соедини VPN с сетью', done: has('VPN') && edges.some(e => nodeById(e.source)?.type === 'VPN' || nodeById(e.target)?.type === 'VPN') },
+      { label: 'Запусти RUN', done: running && has('VPN') },
+    ]
+    return [
+      { label: 'Добавь DNS сервер (100⬡)', done: has('DNS') },
+      { label: 'Соедини DNS с User/Router', done: has('DNS') && edges.some(e => nodeById(e.source)?.type === 'DNS' || nodeById(e.target)?.type === 'DNS') },
+      { label: 'Запусти RUN — DNS пакеты летят', done: running && has('DNS') },
+    ]
+  }, [has, edges, running, nodeById])
+
+  const missionReward: Record<number, { bits: number; ips: number }> = { 1: { bits: 500, ips: 1 }, 2: { bits: 1000, ips: 2 }, 3: { bits: 800, ips: 0 } }
+
+  // completion watcher
+  useEffect(() => {
+    if (mission == null || missionIntro || missionsDone.includes(mission)) return
+    const steps = missionSteps(mission)
+    if (steps.every(s => s.done)) {
+      const r = missionReward[mission]
+      earn(r.bits); if (r.ips) addCleanIPs(r.ips)
+      const done = [...missionsDone, mission]; setMissionsDone(done); localStorage.setItem('netwar_missions', JSON.stringify(done))
+      pushLog(`🏆 Задание ${mission} выполнено! +${r.bits}⬡${r.ips ? ` +${r.ips}◈` : ''}`)
+      if (mission === 1) { setTimeout(() => { addTspuForMission2(); setMission(2); setMissionIntro(true) }, 800) }
+      else if (mission === 2) setTimeout(() => { setMission(3); setMissionIntro(true) }, 800)
+      else setMission(null)
+    }
+  }, [nodes, edges, running, mission, missionIntro, missionsDone]) // eslint-disable-line
+
+  const addTspuForMission2 = useCallback(() => {
+    setNodes(prev => [...prev, { id: newId('ТСПУ'), type: 'ТСПУ', x: 600, y: 200, pinned: false, born: performance.now() }])
+    pushLog('⚠ ТСПУ внедрён в сеть — нужен VPN для обхода')
+  }, [pushLog])
+
+  const startMission = useCallback(() => {
+    setMissionIntro(false); localStorage.setItem('netwar_tutorial_seen', '1')
+  }, [])
+  const skipTutorial = useCallback(() => { setMission(null); setMissionIntro(false); localStorage.setItem('netwar_tutorial_seen', '1') }, [])
+
   const selNode = selected ? nodeById(selected) : null
   void tick // re-render trigger
 
@@ -496,6 +558,44 @@ export default function Sandbox() {
           </div>
         )}
       </div>
+
+      {/* mission intro */}
+      {mission != null && missionIntro && (
+        <Modal onClose={skipTutorial}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 10, color: '#9c6bff', marginBottom: 12 }}>
+            📋 ЗАДАНИЕ {mission}
+          </div>
+          <div style={{ fontSize: 12, color: '#c8d8f0', lineHeight: 1.7, marginBottom: 12 }}>
+            {mission === 1 && 'Построй сеть чтобы User мог достучаться до WebServer. Минимум: User → Switch → Router → Firewall → WebServer. Нужно ~600⬡.'}
+            {mission === 2 && 'ТСПУ внедрён между Router и WebServer и блокирует трафик. Добавь VPN параллельно ТСПУ и направь трафик в обход.'}
+            {mission === 3 && 'Настрой DNS инфраструктуру: добавь DNS сервер, соедини с сетью и проверь что DNS пакеты летят.'}
+          </div>
+          <div style={{ fontSize: 11, color: '#ffb300', marginBottom: 14 }}>
+            Награда: +{missionReward[mission].bits}⬡{missionReward[mission].ips ? ` +${missionReward[mission].ips}◈` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <SBtn label="Начать" color="#00e676" onClick={startMission} />
+            <SBtn label="Пропустить туториал" color="#5a7090" onClick={skipTutorial} />
+          </div>
+        </Modal>
+      )}
+
+      {/* live mission checklist */}
+      {mission != null && !missionIntro && !missionsDone.includes(mission) && (
+        <div style={{ position: 'absolute', top: 70, right: 16, zIndex: 45, width: 260,
+          background: '#0d1424', border: '1.5px solid #9c6bff', boxShadow: '0 0 14px #9c6bff33',
+          padding: '12px 14px', fontFamily: '"Share Tech Mono", monospace' }}>
+          <div style={{ fontFamily: '"Press Start 2P", cursive', fontSize: 8, color: '#9c6bff', marginBottom: 10 }}>
+            ЗАДАНИЕ {mission}
+          </div>
+          {missionSteps(mission).map((s, i) => (
+            <div key={i} style={{ fontSize: 11, color: s.done ? '#00e676' : '#7a9ab8', lineHeight: 1.8,
+              transition: 'color .2s' }}>
+              {s.done ? '☑' : '□'} {s.label}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* User settings panel (block 5) */}
       {userPanel && nodeById(userPanel)?.type === 'User' && (
