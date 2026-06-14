@@ -6,6 +6,7 @@ import ModeSwitcher from './components/ModeSwitcher'
 import Sandbox from './components/Sandbox'
 import EconomyHUD from './components/EconomyHUD'
 import EventSystem from './components/EventSystem'
+import LayersPanel from './components/LayersPanel'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -23,6 +24,7 @@ export default function App() {
   const handleTspu = useCallback((n: number) => setTspuBlocked(n), [])
   const panelOpen = useStore(s => s.selectedNodeId !== null)
   const mode = useStore(s => s.mode)
+  const layersMode = useStore(s => s.layersMode)
   const isTopology = mode === 'topology'
 
   return (
@@ -53,7 +55,8 @@ export default function App() {
       <EconomyHUD />
       {isTopology && <EventSystem />}
 
-      {isTopology && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
+      {isTopology && !layersMode && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
+      <LayersPanel />
       <ScenarioPanel />
     </div>
   )

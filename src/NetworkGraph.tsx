@@ -1030,6 +1030,9 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
             el.select('.pkt-body')
               .attr('x', x - size / 2).attr('y', y - size / 2).attr('width', size).attr('height', size)
               .attr('fill', color).style('filter', `drop-shadow(0 0 4px ${color})`)
+              // response packets render as a diamond (rotate 45°), lighter
+              .attr('transform', d.isResponse ? `rotate(45 ${x} ${y})` : null)
+              .attr('opacity', d.isResponse ? 0.6 : 1)
             el.select('.pkt-out')
               .attr('x', x - size / 2 - 3).attr('y', y - size / 2 - 3)
               .attr('width', size + 6).attr('height', size + 6)

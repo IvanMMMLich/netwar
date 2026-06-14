@@ -26,6 +26,7 @@ interface NetWarStore {
   speed:               number
   speedIdx:            number
   ospfActive:          boolean
+  layersMode:          boolean
   selectedNodeId:      string | null
   scenarioPanelOpen:   boolean
   activeScenario:      number | null
@@ -46,6 +47,7 @@ interface NetWarStore {
   setPaused:             (v: boolean) => void
   cycleSpeed:            () => void
   setOspfActive:         (v: boolean) => void
+  setLayersMode:         (v: boolean) => void
   setSelectedNode:       (id: string | null) => void
   setScenarioPanelOpen:  (v: boolean) => void
   setActiveScenario:     (n: number | null) => void
@@ -72,6 +74,7 @@ export const useStore = create<NetWarStore>((set, get) => ({
   speed:              1,
   speedIdx:           1,
   ospfActive:         false,
+  layersMode:         false,
   selectedNodeId:     null,
   scenarioPanelOpen:  false,
   activeScenario:     null,
@@ -100,6 +103,7 @@ export const useStore = create<NetWarStore>((set, get) => ({
     return { speedIdx: idx, speed: SPEEDS[idx] }
   }),
   setOspfActive:  v  => set({ ospfActive: v }),
+  setLayersMode:  v  => set({ layersMode: v }),
   setSelectedNode: id => set({ selectedNodeId: id }),
   setScenarioPanelOpen: v => set({ scenarioPanelOpen: v }),
   setActiveScenario: n => set({ activeScenario: n, activeScenarioStep: 0 }),

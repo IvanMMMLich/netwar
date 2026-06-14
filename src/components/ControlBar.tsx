@@ -46,7 +46,7 @@ interface Props {
 }
 
 export default function ControlBar({ zoom, onZoom, onFit, onToggleOspf, ospfActive }: Props) {
-  const { paused, setPaused, speed, cycleSpeed, setScenarioPanelOpen } = useStore()
+  const { paused, setPaused, speed, cycleSpeed, setScenarioPanelOpen, layersMode, setLayersMode } = useStore()
   const div = { width: 1, height: 28, background: C.border, flexShrink: 0 } as const
 
   return (
@@ -62,6 +62,8 @@ export default function ControlBar({ zoom, onZoom, onFit, onToggleOspf, ospfActi
           <Btn onClick={cycleSpeed} glow={C.blue}>{speed}x</Btn>
           <div style={div} />
           <Btn onClick={onToggleOspf} active={ospfActive} glow={C.green}>OSPF</Btn>
+          <div style={div} />
+          <Btn onClick={() => setLayersMode(!layersMode)} active={layersMode} glow={C.amber}>СЛОИ</Btn>
           <div style={div} />
           <Btn onClick={onFit} glow={C.blue}>⊡ FIT</Btn>
           <div style={div} />
