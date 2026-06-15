@@ -141,6 +141,7 @@ export default function Sandbox() {
   const [termInput, setTermInput] = useState('')
   const [termOut, setTermOut] = useState<string[]>(['NetWars shell — введи "help" для списка команд'])
   const [tutorialOpen, setTutorialOpen] = useState(() => localStorage.getItem('netwar_tutorial') !== 'done')
+  const [tutorialCollapsed, setTutorialCollapsed] = useState(false)
   const [mergeFlash, setMergeFlash] = useState(false)
   const onMain = repository.currentBranch === 'main'
 
@@ -624,9 +625,10 @@ export default function Sandbox() {
   void tick // re-render trigger
 
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', background: '#070b14',
+    <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0,
+        right: tutorialOpen && !tutorialCollapsed ? 320 : 0, display: 'flex', background: '#070b14',
         border: mergeFlash ? '2px solid #00e676' : onMain ? 'none' : '2px solid #ffb300',
-        boxShadow: mergeFlash ? 'inset 0 0 40px #ffffff44' : 'none', transition: 'border-color .3s' }}
+        boxShadow: mergeFlash ? 'inset 0 0 40px #ffffff44' : 'none', transition: 'right .25s ease, border-color .3s' }}
       onMouseDown={() => { setSelected(null); setCtx(null) }}>
       {/* ── Toolbar ── */}
       <div onMouseDown={e => e.stopPropagation()} style={{ width: TOOLBAR_W, flexShrink: 0, background: '#0d1424',
@@ -823,7 +825,9 @@ export default function Sandbox() {
         <SBtn label="? ТУТОР" color="#00b4ff" onClick={() => setTutorialOpen(true)} />
       </div>
 
-      <Tutorial open={tutorialOpen} onClose={() => setTutorialOpen(false)} />
+      <Tutorial open={tutorialOpen} collapsed={tutorialCollapsed}
+        onToggleCollapse={() => setTutorialCollapsed(c => !c)}
+        onClose={() => { setTutorialOpen(false); setTutorialCollapsed(false) }} />
 
       {/* active effect timers */}
       {effects.length > 0 && (
