@@ -9,6 +9,7 @@ import EventSystem from './components/EventSystem'
 import LayersPanel from './components/LayersPanel'
 import HistoryView from './components/HistoryView'
 import SoundToggle from './components/SoundToggle'
+import GameCursor from './components/GameCursor'
 import { useStore } from './store'
 
 const PANEL_WIDTH = 300
@@ -69,6 +70,7 @@ export default function App() {
       {isTopology && !layersMode && <NodePanel nodeStats={nodeStats} tspuBlocked={tspuBlocked} />}
       <LayersPanel />
       <ScenarioPanel />
+      <GameCursor />
     </div>
   )
 }

@@ -990,6 +990,9 @@ export default function NetworkGraph({ onNodeStats, onTspuBlocked }: Props) {
           const op = age < 300 ? (1 - age / 300) * 0.85 : 0
           if (age >= 300) tspuFlashRef.current = 0
           nodeSelRef.current.select('.tspu-flash').attr('opacity', op)
+        } else if (tspuModeRef.current !== 'OFF') {
+          // ТСПУ always has a faint red "threat" pulse (its character)
+          nodeSelRef.current.select('.tspu-flash').attr('opacity', 0.06 + (Math.sin(now / 600) * 0.5 + 0.5) * 0.1)
         }
         // node-load bars (throttled): load = packets on incident edges
         if (frame % 4 === 0) {
