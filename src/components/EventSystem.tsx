@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useStore } from '../store'
-import { audio } from '../services/audioEngine'
+import { SFX } from '../services/sfx'
 
 // ─── Event definitions ───────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export default function EventSystem() {
       if (mode === 'topology' && !paused && !active) {
         elapsed.current += dt
         const ev = EVENTS.find(e => !fired.current.has(e.id) && elapsed.current / 1000 >= e.at)
-        if (ev) { fired.current.add(ev.id); setActive(ev); setQuiz(null); setQuizPick(null); audio.sfxEvent() }
+        if (ev) { fired.current.add(ev.id); setActive(ev); setQuiz(null); setQuizPick(null); SFX.EVENT_ALERT() }
       }
       raf = requestAnimationFrame(loop)
     }

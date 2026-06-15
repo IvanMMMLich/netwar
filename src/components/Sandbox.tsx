@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import Tutorial from './Tutorial'
-import { audio } from '../services/audioEngine'
+import { SFX } from '../services/sfx'
 import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
   sbEdgeParams, sbBwWidth, sbBwLabel, SB_UPKEEP, edgeUpkeep, TOOL_INFO,
@@ -224,7 +224,7 @@ export default function Sandbox() {
       const item = SB_BY_TYPE.get(d.type)!
       if (!spend(item.bits, item.ips)) { setFlash(true); setTimeout(() => setFlash(false), 350); pushLog(`⚠ Недостаточно средств для ${item.full}`); return }
       setNodes(prev => [...prev, { id: newId(d.type), type: d.type, x, y, pinned: false, born: performance.now() }])
-      pushLog(`✓ ${item.full} создан (-${item.bits}⬡${item.ips ? ` -${item.ips}◈` : ''})`); fireAction('addNode'); audio.sfxNode()
+      pushLog(`✓ ${item.full} создан (-${item.bits}⬡${item.ips ? ` -${item.ips}◈` : ''})`); fireAction('addNode'); SFX.NODE_CREATED()
     }
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
@@ -287,7 +287,7 @@ export default function Sandbox() {
         setEdges(prev => [...prev, { id: newId('e'), source: a.id, target: b.id, ...pr, born: performance.now() }])
         if (hint.level === 'warn') pushLog(`⚠ Ребро создано: ${hint.message}`)
         else pushLog(`✓ Ребро ${SB_BY_TYPE.get(a.type)!.full} → ${SB_BY_TYPE.get(b.type)!.full}`)
-        fireAction('addEdge'); audio.sfxEdge()
+        fireAction('addEdge'); SFX.EDGE_CREATED()
         const plaque = edgePlaque(a.type, b.type)
         if (plaque) setEdgePlaque({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, text: plaque, until: Date.now() + 2000 })
       }
@@ -488,7 +488,7 @@ export default function Sandbox() {
     const buildState = () => ({ nodes, edges, economy: { bits: Math.round(bits), cleanIPs, asLevel }, stats: { delivered: 0, blocked: 0 } })
     if (cmd === 'save') {
       const msg = arg.replace(/^["']|["']$/g, '') || 'без описания'
-      const hash = gitCommit(msg, buildState()); termPrint(`Committed ${hash} '${msg}'`); audio.sfxCommit()
+      const hash = gitCommit(msg, buildState()); termPrint(`Committed ${hash} '${msg}'`); SFX.GIT_COMMIT()
     } else if (cmd === 'branch') {
       if (!arg) { termPrint('usage: branch <имя>'); return }
       gitBranch(arg); termPrint(`Switched to new branch '${arg}'`)
@@ -499,7 +499,7 @@ export default function Sandbox() {
     } else if (cmd === 'merge') {
       if (!arg) { termPrint('usage: merge <ветка>'); return }
       const res = gitMerge(arg)
-      if (res.ok) { termPrint(res.msg); setMergeFlash(true); audio.sfxMerge(); setTimeout(() => setMergeFlash(false), 2300) }
+      if (res.ok) { termPrint(res.msg); setMergeFlash(true); SFX.MERGE_SUCCESS(); setTimeout(() => setMergeFlash(false), 2300) }
       else termPrint(`⚠ CONFLICT: ${res.msg}`)
     } else if (cmd === 'log') {
       const hist = [...repository.commits].reverse().slice(0, 10)
