@@ -52,7 +52,7 @@ export default function App() {
 
       <div style={{ ...HUD, top: 16, left: 16, color: '#00e676',
         textShadow: '0 0 8px #00e676, 0 0 16px #00e67666', display: 'flex', gap: 10, alignItems: 'center' }}>
-        SYS::NETWAR v0.5.0
+        SYS::NETWAR v0.5.1
         <span style={{ fontSize: 11, color: onMain ? '#00e676' : '#ffb300',
           border: `1px solid ${onMain ? '#00e67655' : '#ffb30055'}`, padding: '1px 7px' }}>
           {branch} ●

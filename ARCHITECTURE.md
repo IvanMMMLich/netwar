@@ -61,7 +61,8 @@ netwar/
     │   └── Scenarios.tsx     ← экран сценариев (в разработке)
     ├── services/            ← v0.5.0 сервисы
     │   ├── saveSystem.ts     ← git-style сохранения (commit/branch/merge/checkout)
-    │   └── audioEngine.ts    ← процедурная музыка + SFX (Web Audio API)
+    │   ├── music.ts          ← процедурная музыка Tone.js (v0.5.1)
+    │   └── sfx.ts            ← звуковые эффекты ZzFX + Tone (v0.5.1)
     └── data/
         ├── topology.ts       ← данные топологии (узлы и рёбра)
         ├── topologyRules.ts  ← правила соединений (единый источник правды)
@@ -70,9 +71,10 @@ netwar/
         └── tutorialData.ts   ← 8 глав интерактивного туториала
 
 Новые компоненты v0.5.0:
-  GameCursor.tsx   ← кастомный курсор-прицел с радар-задержкой
+  GameCursor.tsx   ← пиксельный курсор-стрелка с радар-задержкой (v0.5.1)
+  GitTerminal.tsx  ← полный терминал (история ↑↓, Tab, log/ls/diff) (v0.5.1)
   SoundToggle.tsx  ← кнопка 🔊/🔇 управления звуком
-  HistoryView.tsx  ← вкладка HISTORY, D3 граф коммитов
+  HistoryView.tsx  ← вкладка HISTORY: ветки + PR + D3 граф коммитов
   Tutorial.tsx     ← overlay 8-главного туториала
 ```
 
