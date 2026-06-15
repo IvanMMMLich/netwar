@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useStore } from '../store'
 import Tutorial from './Tutorial'
+import GitTerminal from './GitTerminal'
 import { SFX } from '../services/sfx'
 import {
   SB_CATALOG, SB_BY_TYPE, SbType, SB_NODE_SIZE, SbCatalogItem,
@@ -799,26 +800,11 @@ export default function Sandbox() {
           onClose={() => setUserPanel(null)} />
       )}
 
-      {/* terminal line (above bottom controls) */}
-      <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 76, left: 90, right: 16, zIndex: 42,
-        background: '#070b14', border: `1px solid ${onMain ? '#1e2d4a' : '#ffb30055'}`, fontFamily: '"Share Tech Mono", monospace' }}>
-        {termOut.length > 0 && (
-          <div style={{ maxHeight: 110, overflowY: 'auto', padding: '6px 10px', fontSize: 11, color: '#7a9ab8', lineHeight: 1.6 }}>
-            {termOut.slice(-8).map((l, i) => (
-              <div key={i} style={{ color: l.startsWith('Committed') || l.startsWith('Merge') || l.startsWith('Switched') ? '#00e676'
-                : l.includes('CONFLICT') || l.startsWith('unknown') ? '#ff8c00' : l.startsWith('netwar@') ? '#00b4ff' : '#7a9ab8' }}>{l}</div>
-            ))}
-          </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', height: 32, padding: '0 10px', borderTop: termOut.length ? '1px solid #1e2d4a' : 'none' }}>
-          <span style={{ color: '#00e676', fontSize: 11, marginRight: 6, whiteSpace: 'nowrap' }}>netwar@sandbox:~/{repository.currentBranch} $</span>
-          <input value={termInput} onChange={e => setTermInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') { runCmd(termInput); setTermInput('') } }}
-            placeholder='save "описание"  |  help'
-            style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#00e676',
-              fontFamily: '"Share Tech Mono", monospace', fontSize: 11 }} />
-        </div>
-      </div>
+      {/* git terminal (block 3) */}
+      <GitTerminal nodes={nodes} edges={edges} bits={bits} cleanIPs={cleanIPs} asLevel={asLevel}
+        onApplyState={(n, e) => { setNodes(n); setEdges(e); pushLog('📂 Состояние загружено') }}
+        onMergeFlash={() => { setMergeFlash(true); setTimeout(() => setMergeFlash(false), 2300) }}
+        onBranchSwitch={() => {}} />
 
       {/* bottom control panel */}
       <div onMouseDown={e => e.stopPropagation()} style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
