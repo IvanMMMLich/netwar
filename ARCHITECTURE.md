@@ -59,10 +59,21 @@ netwar/
     │   ├── Controls.tsx      ← кнопки PLAY/PAUSE/OSPF/SCENARIOS
     │   ├── ZoomControls.tsx  ← кнопки +/- справа
     │   └── Scenarios.tsx     ← экран сценариев (в разработке)
+    ├── services/            ← v0.5.0 сервисы
+    │   ├── saveSystem.ts     ← git-style сохранения (commit/branch/merge/checkout)
+    │   └── audioEngine.ts    ← процедурная музыка + SFX (Web Audio API)
     └── data/
         ├── topology.ts       ← данные топологии (узлы и рёбра)
+        ├── topologyRules.ts  ← правила соединений (единый источник правды)
         ├── nodeConfig.ts     ← конфиги каждого типа узла
-        └── scenarios.ts      ← данные 15 сценариев
+        ├── scenarios.ts      ← данные 15 сценариев
+        └── tutorialData.ts   ← 8 глав интерактивного туториала
+
+Новые компоненты v0.5.0:
+  GameCursor.tsx   ← кастомный курсор-прицел с радар-задержкой
+  SoundToggle.tsx  ← кнопка 🔊/🔇 управления звуком
+  HistoryView.tsx  ← вкладка HISTORY, D3 граф коммитов
+  Tutorial.tsx     ← overlay 8-главного туториала
 ```
 
 > Если файлов нет — создай их в этой структуре.
