@@ -29,6 +29,7 @@ interface NetWarStore {
   speedIdx:            number
   ospfActive:          boolean
   layersMode:          boolean
+  tutorialActive:      boolean
   selectedNodeId:      string | null
   scenarioPanelOpen:   boolean
   activeScenario:      number | null
@@ -54,6 +55,7 @@ interface NetWarStore {
   cycleSpeed:            () => void
   setOspfActive:         (v: boolean) => void
   setLayersMode:         (v: boolean) => void
+  setTutorialActive:     (v: boolean) => void
   setSelectedNode:       (id: string | null) => void
   setScenarioPanelOpen:  (v: boolean) => void
   setActiveScenario:     (n: number | null) => void
@@ -70,7 +72,7 @@ const SPEEDS = [0.5, 1, 1.5, 2]
 export const useStore = create<NetWarStore>((set, get) => ({
   mode:               'topology',
   repository:         loadRepo(),
-  bits:               500,
+  bits:               2000,
   score:              0,
   cleanIPs:           3,
   asLevel:            1,
@@ -82,6 +84,7 @@ export const useStore = create<NetWarStore>((set, get) => ({
   speedIdx:           1,
   ospfActive:         false,
   layersMode:         false,
+  tutorialActive:     false,
   selectedNodeId:     null,
   scenarioPanelOpen:  false,
   activeScenario:     null,
@@ -121,6 +124,7 @@ export const useStore = create<NetWarStore>((set, get) => ({
   }),
   setOspfActive:  v  => set({ ospfActive: v }),
   setLayersMode:  v  => set({ layersMode: v }),
+  setTutorialActive: v => set({ tutorialActive: v }),
   setSelectedNode: id => set({ selectedNodeId: id }),
   setScenarioPanelOpen: v => set({ scenarioPanelOpen: v }),
   setActiveScenario: n => set({ activeScenario: n, activeScenarioStep: 0 }),

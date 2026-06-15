@@ -338,9 +338,13 @@ export default function Sandbox() {
   useEffect(() => { edgesRef.current = edges }, [edges])
 
   // ── per-second economy: upkeep (always) + income rate (while RUN) ──
+  // sync tutorial-active flag (freezes economy during tutorial — fix 1)
+  useEffect(() => { useStore.getState().setTutorialActive(tutorialOpen) }, [tutorialOpen])
+
   useEffect(() => {
     const iv = setInterval(() => {
       if (mode !== 'sandbox') return
+      if (useStore.getState().tutorialActive) return   // freeze upkeep during tutorial
       const ns = nodesRef.current, es = edgesRef.current
       const upkeep = ns.reduce((s, n) => s + (n.disabled ? 0 : SB_UPKEEP[n.type]), 0)
                    + es.reduce((s, e) => s + edgeUpkeep(e.bw), 0)
